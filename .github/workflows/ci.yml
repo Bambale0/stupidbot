@@ -18,27 +18,6 @@ jobs:
     timeout-minutes: 15
 
     env:
-          POSTGRES_USER: stupidbot
-          POSTGRES_PASSWORD: stupidbot
-          POSTGRES_DB: stupidbot_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U stupidbot -d stupidbot_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
       APP_ENV: ci
       LOG_LEVEL: INFO
       TELEGRAM_BOT_TOKEN: "123456:test-token"
