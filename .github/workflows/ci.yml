@@ -17,10 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
+    env:
           POSTGRES_USER: stupidbot
           POSTGRES_PASSWORD: stupidbot
           POSTGRES_DB: stupidbot_test
@@ -51,8 +48,8 @@ jobs:
       PUBLIC_BASE_URL: https://example.com
       MINI_APP_PATH: /miniapp
       ADMIN_IDS: "1001"
-      DATABASE_URL: postgresql+asyncpg://stupidbot:stupidbot@127.0.0.1:5432/stupidbot_test
-      REDIS_URL: redis://127.0.0.1:6379/0
+      DATABASE_URL: sqlite+aiosqlite:///./stupidbot_ci.sqlite3
+      REDIS_URL: redis://localhost:6379/0
       AUTO_CREATE_DB: "true"
       COMET_API_KEY: ci-comet-key
       COMET_BASE_URL: https://api.cometapi.com
