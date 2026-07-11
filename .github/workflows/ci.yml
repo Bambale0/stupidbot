@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: compile + smoke + regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stupidbot
+          POSTGRES_PASSWORD: stupidbot
+          POSTGRES_DB: stupidbot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stupidbot -d stupidbot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      APP_ENV: ci
+      LOG_LEVEL: INFO
+      TELEGRAM_BOT_TOKEN: "123456:test-token"
+      TELEGRAM_SET_WEBHOOK: "false"
+      TELEGRAM_BOT_USERNAME: eva_nana_bot
+      TELEGRAM_SECRET_TOKEN: ci-secret
+      PUBLIC_BASE_URL: https://example.com
+      MINI_APP_PATH: /miniapp
+      ADMIN_IDS: "1001"
+      DATABASE_URL: postgresql+asyncpg://stupidbot:stupidbot@127.0.0.1:5432/stupidbot_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      AUTO_CREATE_DB: "true"
+      COMET_API_KEY: ci-comet-key
+      COMET_BASE_URL: https://api.cometapi.com
+      COMET_CALLBACK_SECRET: ci-comet-secret
+      COMET_IMAGE_SIMPLE_MODEL: gemini-3.1-flash-image-preview
+      COMET_IMAGE_PRO_MODEL: gemini-3-pro-image-preview
+      COMET_IMAGE_2_MODEL: gemini-3.1-flash-image-preview
+      COMET_KLING_2_6_MODEL: kling-v2-6
+      COMET_KLING_3_0_MODEL: kling-v2-master
+      COMET_SEEDANCE_2_MODEL: doubao-seedance-2-0
+      KIE_API_KEY: ci-kie-key
+      KIE_BASE_URL: https://api.kie.ai
+      KIE_UPLOAD_BASE_URL: https://kieai.redpandaai.co
+      KIE_IMAGE_SIMPLE_MODEL: nano-banana-2
+      KIE_IMAGE_PRO_MODEL: nano-banana-pro
+      KIE_IMAGE_2_MODEL: nano-banana-2
+      KIE_KLING_2_6_MODEL: kling-2.6/image-to-video
+      KIE_KLING_3_0_MODEL: kling-3.0/video
+      KIE_KLING_2_6_MOTION_CONTROL_MODEL: kling-2.6/motion-control
+      KIE_KLING_3_0_MOTION_CONTROL_MODEL: kling-3.0/motion-control
+      KIE_SEEDANCE_2_MODEL: bytedance/seedance-2
+      TBANK_TERMINAL_KEY: terminal
+      TBANK_PASSWORD: password
+      TBANK_SUCCESS_URL: https://example.com/payments/success
+      TBANK_FAIL_URL: https://example.com/payments/fail
+      ENABLED_PLUGINS: core,generation,gallery,feed,partners,payments,admin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install -U pip setuptools wheel
+          python -m pip install -e ".[dev]"
+
+      - name: Run CI checks
+        run: scripts/ci.sh

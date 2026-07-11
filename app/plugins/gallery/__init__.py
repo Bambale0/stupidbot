@@ -1,0 +1,2 @@
+"""Public gallery plugin."""
+

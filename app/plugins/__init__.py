@@ -1,0 +1,2 @@
+"""Bot plugin package."""
+

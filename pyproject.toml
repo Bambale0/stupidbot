@@ -1,0 +1,43 @@
+[project]
+name = "stupidbot"
+version = "0.1.0"
+description = "Telegram webhook bot for Comet API image and video generation."
+requires-python = ">=3.10"
+dependencies = [
+  "alembic>=1.14,<2",
+  "aiogram>=3.23,<4",
+  "asyncpg>=0.30,<1",
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "pydantic-settings>=2.6,<3",
+  "Pillow>=10,<13",
+  "redis>=5,<7",
+  "SQLAlchemy>=2.0,<3",
+  "uvicorn[standard]>=0.32,<1",
+  "watchfiles>=1,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.8,<1",
+]
+
+[project.scripts]
+stupidbot = "app.main:main"
+stupidbot-watch = "app.watchdog:main"
+stupidbot-init-db = "scripts.init_db:main"
+stupidbot-migrate-db = "scripts.migrate_db:main"
+
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "scripts*"]
+
+[tool.setuptools.package-data]
+app = ["static/miniapp/*.html", "static/miniapp/assets/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
