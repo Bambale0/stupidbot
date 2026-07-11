@@ -1389,3 +1389,362 @@ button:active:not(:disabled) {
     height: 76px;
   }
 }
+
+/* Mobile hardening pass: keep every Mini App screen inside Telegram viewport. */
+.banana-app,
+.top-strip,
+.page-head,
+.section-row,
+.hero-card,
+.trend-grid,
+.create-grid,
+.tariff-list,
+.profile-stack,
+.history-stack,
+.feed-grid,
+.sheet,
+.form-stack,
+.custom-credit-panel,
+.feed-card,
+.tariff-card,
+.info-card,
+.history-card,
+.handoff-card,
+.upload-box,
+.model-menu,
+.select-button,
+.pay-button,
+.primary-button,
+.outline-button,
+.danger-button,
+.copy-button {
+  max-width: 100%;
+}
+
+.page-title,
+.page-title > *,
+.section-row > *,
+.hero-copy,
+.feed-card,
+.feed-card *,
+.tariff-card,
+.tariff-card *,
+.history-card,
+.history-card *,
+.info-card,
+.info-card *,
+.custom-credit-panel,
+.custom-credit-panel *,
+.sheet,
+.sheet *,
+.mode-tile,
+.mode-tile *,
+.trend-card,
+.trend-card * {
+  min-width: 0;
+}
+
+h1,
+h2,
+h3,
+p,
+small,
+strong,
+.feed-caption,
+.feed-author,
+.model-option,
+.select-button,
+.custom-credit-total,
+.status-line,
+.field-error {
+  overflow-wrap: anywhere;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+.feed-author,
+.feed-model-tag,
+.history-card small,
+.tariff-card h3,
+.tariff-card strong,
+.model-option strong,
+.model-option small,
+.select-button span,
+.file-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-author,
+.feed-model-tag,
+.history-card small,
+.model-option small,
+.select-button span {
+  white-space: nowrap;
+}
+
+.feed-actions {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.repeat-btn {
+  margin-left: 0 !important;
+  white-space: nowrap;
+}
+
+.tariff-card strong {
+  flex-wrap: wrap;
+  font-size: clamp(1.08rem, 5.2vw, 1.65rem);
+}
+
+.tariff-card .price {
+  font-size: clamp(1rem, 4.7vw, 1.35rem);
+}
+
+.custom-credit-total {
+  flex-wrap: wrap;
+}
+
+.history-card.result-card > strong,
+.history-card > strong:last-child {
+  justify-self: end;
+}
+
+.sheet {
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 430px) {
+  :root {
+    --nav-h: 88px;
+  }
+
+  .banana-app {
+    width: 100%;
+    padding-top: 10px;
+    padding-bottom: calc(var(--nav-h) + 28px + env(safe-area-inset-bottom));
+  }
+
+  .top-strip {
+    margin-left: -10px;
+    margin-right: -10px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .page-head,
+  .section-row {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .page-head .ghost-pill,
+  .section-row .ghost-pill {
+    flex: 0 0 auto;
+  }
+
+  .hero-card {
+    min-height: 164px;
+    border-radius: 18px;
+  }
+
+  .hero-media {
+    right: -42px;
+    bottom: -70px;
+    width: min(58%, 210px);
+  }
+
+  .hero-copy {
+    padding: 18px;
+  }
+
+  .hero-copy p {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .trend-grid {
+    gap: 10px;
+  }
+
+  .trend-card {
+    min-height: 136px;
+    padding: 10px;
+  }
+
+  .create-grid {
+    gap: 10px;
+  }
+
+  .mode-tile {
+    min-height: 150px;
+    padding: 14px 10px;
+  }
+
+  .mode-tile span {
+    width: 58px;
+    height: 58px;
+    font-size: 1.7rem;
+  }
+
+  .mode-tile strong {
+    display: block;
+    font-size: clamp(1rem, 4.8vw, 1.18rem);
+    text-align: center;
+  }
+
+  .mode-tile.is-wide {
+    min-height: 118px;
+  }
+
+  .custom-credit-panel,
+  .tariff-card,
+  .info-card,
+  .history-card,
+  .history-note,
+  .empty-state {
+    border-radius: 16px;
+  }
+
+  .tariff-card {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    min-height: 0;
+  }
+
+  .tariff-card .price {
+    justify-self: start;
+  }
+
+  .hit {
+    right: 14px;
+    max-width: calc(100% - 28px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .feed-card-footer,
+  .feed-card-header {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .feed-actions button {
+    min-height: 34px;
+  }
+
+  .repeat-btn {
+    padding: 6px 10px !important;
+  }
+
+  .history-note {
+    grid-template-columns: 38px minmax(0, 1fr);
+    padding: 14px;
+  }
+
+  .history-note span {
+    width: 38px;
+    height: 38px;
+  }
+
+  .history-card {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .history-thumb {
+    width: 72px;
+    height: 72px;
+    border-radius: 14px;
+  }
+
+  .sheet {
+    max-height: min(88vh, calc(var(--tg-viewport-height, 100vh) - 18px));
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+    border-radius: 22px 22px 0 0;
+  }
+
+  .sheet-head {
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 10px;
+  }
+
+  .icon-button {
+    width: 46px;
+    height: 46px;
+  }
+
+  .upload-box {
+    min-height: 152px;
+    padding: 14px;
+  }
+
+  .preview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .model-option {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .model-option small {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 360px) {
+  .bottom-nav {
+    grid-template-columns: repeat(2, minmax(38px, 1fr)) 62px repeat(3, minmax(38px, 1fr));
+    padding-left: max(4px, env(safe-area-inset-left));
+    padding-right: max(4px, env(safe-area-inset-right));
+  }
+
+  .nav-button small {
+    font-size: 0.5rem;
+  }
+
+  .nav-button span {
+    width: 26px;
+    height: 26px;
+  }
+
+  .fab span {
+    width: 52px;
+    height: 52px;
+    border-width: 4px;
+  }
+
+  .trend-grid,
+  .create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-card,
+  .mode-tile {
+    min-height: 132px;
+  }
+
+  .history-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .history-thumb {
+    width: 64px;
+    height: 64px;
+  }
+
+  .history-card > strong:last-child {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
