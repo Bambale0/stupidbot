@@ -26,8 +26,13 @@ export function bootTelegram(telegramApp, { onMainButtonClick, onViewportChanged
   telegramApp.onEvent?.("viewportChanged", onViewportChanged);
 }
 
-export function updateMainButton(telegramApp, { text, enabled }) {
+export function updateMainButton(telegramApp, { text, enabled, visible = true }) {
   if (!telegramApp?.MainButton) {
+    return;
+  }
+
+  if (!visible) {
+    telegramApp.MainButton.hide?.();
     return;
   }
 

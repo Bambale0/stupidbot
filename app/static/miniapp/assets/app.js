@@ -293,9 +293,11 @@ function authHeaders(extra = {}) {
 }
 
 function updateTelegramRunButton() {
+  const visible = state.sheetOpen || state.tab === "create";
   updateMainButton(telegramApp, {
     text: state.sheetOpen ? `Отправить бриф · ${displayPriceText()}` : "Создать",
     enabled: state.sheetOpen ? promptExists(state.prompt) : true,
+    visible,
   });
 }
 

@@ -426,12 +426,25 @@ h3 {
 
 .tariff-list,
 .profile-stack,
-.history-stack,
+.history-stack {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.profile-stack,
+.profile-stack > * {
+  width: 100%;
+  max-width: 100%;
+}
+
 /* Feed — Instagram style */
 .feed-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 .feed-head-actions {
   display: flex;
@@ -806,6 +819,22 @@ h3 {
   background: rgba(25, 8, 23, 0.12);
 }
 
+
+.profile-stack .info-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.profile-stack .info-card h2,
+.profile-stack .info-card p {
+  overflow-wrap: anywhere;
+}
+
+.profile-stack .danger-button {
+  max-width: 100%;
+  white-space: normal;
+}
+
 .history-note {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
@@ -904,11 +933,12 @@ h3 {
   bottom: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(42px, 1fr)) 72px repeat(3, minmax(42px, 1fr));
+  gap: 2px;
   width: min(100%, 560px);
   min-height: calc(var(--nav-h) + env(safe-area-inset-bottom));
-  padding: 10px max(10px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom))
-    max(10px, env(safe-area-inset-left));
+  padding: 10px max(6px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom))
+    max(6px, env(safe-area-inset-left));
   border-top: 1px solid rgba(255, 63, 159, 0.16);
   background: linear-gradient(180deg, rgba(7, 17, 33, 0.34), rgba(5, 8, 21, 0.96) 18%);
   backdrop-filter: blur(18px);
@@ -931,8 +961,8 @@ h3 {
 .nav-button small {
   min-width: 0;
   overflow: hidden;
-  font-size: 0.66rem;
-  line-height: 1.1;
+  font-size: clamp(0.54rem, 1.7vw, 0.66rem);
+  line-height: 1.05;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -955,8 +985,8 @@ h3 {
 }
 
 .fab span {
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border: 5px solid rgba(255, 139, 103, 0.76);
   border-radius: 999px;
   background: radial-gradient(circle, var(--lime) 34%, var(--lime-2));
@@ -1268,6 +1298,53 @@ button:active:not(:disabled) {
   .banana-app {
     padding-left: max(10px, env(safe-area-inset-left));
     padding-right: max(10px, env(safe-area-inset-right));
+  }
+
+  .profile-head {
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .avatar {
+    width: 76px;
+    height: 76px;
+    border-width: 4px;
+    font-size: 1.7rem;
+  }
+
+  .info-card {
+    padding: 18px;
+  }
+
+  .info-card.lime h2 {
+    font-size: clamp(1.42rem, 7.5vw, 2rem);
+  }
+
+  .ref-row {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .copy-button {
+    width: 44px;
+    min-height: 44px;
+  }
+
+  .nav-button {
+    gap: 3px;
+    font-size: 0.58rem;
+  }
+
+  .nav-button span {
+    width: 28px;
+    height: 28px;
+    font-size: 1.08rem;
+  }
+
+  .fab span {
+    width: 56px;
+    height: 56px;
+    font-size: 1.58rem;
   }
 
   .trend-grid {
