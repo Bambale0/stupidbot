@@ -91,7 +91,7 @@ jobs:
       - name: Broad current-policy SQLite regression
         run: |
           set -Eeuo pipefail
-          python -c 'import asyncio; import scripts.sqlite_jsonb_compat; import scripts.regression_500_current as regression; asyncio.run(regression.amain())' 2>&1 | tee broad-sqlite.log
+          python -c 'import asyncio; import scripts.sqlite_jsonb_compat; import scripts.sqlite_feed_query as feed; import scripts.current_policy_regression_adapter as regression; regression.legacy.get_feed_tasks = feed.get_feed_tasks; asyncio.run(regression.amain())' 2>&1 | tee broad-sqlite.log
       - name: Upload broad SQLite log
         if: always()
         uses: actions/upload-artifact@v4
