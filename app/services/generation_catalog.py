@@ -10,18 +10,20 @@ DEFAULT_IMAGE_ASPECT_RATIO = "9:16"
 DEFAULT_MODELS: list[dict[str, Any]] = [
     {
         "code": "nano-banana",
-        "title": "Banana",
+        "title": "Nano Banana 2 Lite",
         "category": "image",
-        "description": "Banana Image через Comet API.",
+        "description": "Nano Banana 2 Lite 1K через KIE API.",
         "position": 10,
         "price_credits": 2,
         "config": {
-            "provider": "comet",
-            "provider_model": "gemini-3.1-flash-image-preview",
+            "provider": "kie",
+            "provider_family": "image",
+            "provider_model": "nano-banana-2-lite",
             "aspect_ratios": list(IMAGE_ASPECT_RATIOS),
-            "resolutions": list(IMAGE_RESOLUTIONS),
-            "output_formats": ["png", "jpg"],
-            "max_images": 1,
+            "resolutions": ["1K"],
+            "default_resolution": "1K",
+            "output_formats": [],
+            "max_images": 10,
         },
     },
     {
