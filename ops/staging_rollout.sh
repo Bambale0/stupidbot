@@ -14,6 +14,7 @@ code_backup="${backup_dir}/app-code.tar.gz"
 db_backup="${backup_dir}/postgres.dump"
 restore_root="${release_root}/rollback-${release_sha}"
 mutation_started=0
+local_health_passed=0
 rollout_succeeded=0
 
 run_root() {
@@ -141,7 +142,9 @@ tar -xzf "${archive}" -C "${candidate}"
 python3 -m compileall -q "${candidate}/app" "${candidate}/scripts"
 (
   cd "${candidate}"
+  python3 scripts/regression_deployment_safety.py
   python3 scripts/regression_bot_ux.py
+  python3 scripts/regression_gallery_compat.py
 )
 chmod 700 "${candidate}/ops/verify_postgres_restore.sh"
 "${candidate}/ops/verify_postgres_restore.sh" \
@@ -159,7 +162,9 @@ rsync --archive --delete \
 cd "${app_dir}"
 python3 -m compileall -q app scripts
 python3 -m scripts.init_db
+python3 scripts/regression_deployment_safety.py
 python3 scripts/regression_bot_ux.py
+python3 scripts/regression_gallery_compat.py
 python3 scripts/admin_smoke.py
 python3 scripts/regression_500_current.py
 python3 scripts/staging_issue3_db_smoke.py
@@ -169,24 +174,26 @@ health_url=${STUPIDBOT_LOCAL_HEALTH_URL:-http://127.0.0.1:8092/health}
 for attempt in $(seq 1 20); do
   if response=$(curl --fail --silent --show-error --max-time 5 "${health_url}") \
     && [[ "${response}" == *'"status":"ok"'* || "${response}" == *'"status": "ok"'* ]]; then
-    rollout_succeeded=1
+    local_health_passed=1
     break
   fi
   sleep 2
 done
 
-if (( rollout_succeeded == 0 )); then
+if (( local_health_passed == 0 )); then
   echo "Health check failed: ${health_url}" >&2
   exit 1
 fi
 
 python3 scripts/staging_issue3_public_smoke.py
 run_root systemctl status "${service_name}" --no-pager --lines=20
+rollout_succeeded=1
 journalctl -u "${service_name}" --since "5 minutes ago" --no-pager --lines=100 \
   | sed -E 's/(token|password|secret|api[_-]?key)=([^[:space:]]+)/\1=[REDACTED]/Ig' || true
 
 echo "Backup directory: ${backup_dir}"
 echo "Database restore verification: passed"
+echo "Deployment safety regression: passed"
 echo "Bot UX regression: passed"
 echo "Transactional financial smoke: passed"
 echo "Public Mini App smoke: passed"
