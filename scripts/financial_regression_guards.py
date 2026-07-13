@@ -18,6 +18,11 @@ from app.models import (
 from app.services import payments as payment_service
 from app.services.financial_integrity import package_is_user_visible, record_task_financials
 from app.services.financial_settings import photo_credit_value_kopecks
+from app.services.partial_refunds import (
+    PartialRefundPolicyError,
+    cumulative_reversal_target,
+    incremental_reversal_delta,
+)
 
 
 async def custom_sales_are_disabled() -> None:
@@ -31,12 +36,44 @@ async def custom_sales_are_disabled() -> None:
         raise AssertionError("custom universal-credit sales are enabled")
 
 
+def partial_refund_policy_is_deterministic() -> None:
+    payment = 390
+    grant = 10
+
+    first_target = cumulative_reversal_target(grant, 39, payment)
+    assert first_target == 1
+    assert incremental_reversal_delta(grant, 0, 39, payment) == 1
+    assert incremental_reversal_delta(grant, first_target, 39, payment) == 0
+
+    second_target = cumulative_reversal_target(grant, 129, payment)
+    assert second_target == 3
+    assert incremental_reversal_delta(grant, first_target, 129, payment) == 2
+
+    commission_target = cumulative_reversal_target(3000, 3333, 10000)
+    assert commission_target == 999
+
+    assert cumulative_reversal_target(grant, payment, payment) == grant
+    assert cumulative_reversal_target(grant, payment - 1, payment, force_full=True) == grant
+    assert incremental_reversal_delta(grant, second_target, payment, payment) == 7
+    assert cumulative_reversal_target(grant, payment * 2, payment) == grant
+    assert cumulative_reversal_target(grant, -100, payment) == 0
+
+    try:
+        cumulative_reversal_target(grant, 1, 0)
+    except PartialRefundPolicyError:
+        pass
+    else:
+        raise AssertionError("zero payment amount was accepted by partial refund policy")
+
+
 async def run_guards(
     session: AsyncSession,
     settings: object,
     suffix: str,
     context: dict[str, object],
 ) -> None:
+    partial_refund_policy_is_deterministic()
+
     buyer = context["buyer"]
     model = context["model"]
     assert isinstance(buyer, User)
