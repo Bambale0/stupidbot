@@ -6,9 +6,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.models import CreditPackage, GenerationModel, PartnerLink
 
 MAIN_MENU_CALLBACK = "menu:main"
+ACCOUNT_MENU_CALLBACK = "menu:account"
 BANANA_UNIT = "🍌"
-MAIN_MENU_BUTTON_TEXT = "Главное меню"
-BACK_BUTTON_TEXT = "Назад"
+MAIN_MENU_BUTTON_TEXT = "Главная"
+BACK_BUTTON_TEXT = "← Назад"
 
 
 def banana_amount(value: int | float | str) -> str:
@@ -45,37 +46,31 @@ def package_credits_text(package: CreditPackage, *, short: bool = False) -> str:
 
 
 def main_menu(is_admin: bool = False, mini_app_url: str | None = None) -> InlineKeyboardMarkup:
+    del is_admin
     builder = InlineKeyboardBuilder()
     if mini_app_url:
-        builder.button(text="BANANA", web_app=WebAppInfo(url=mini_app_url))
+        builder.button(text="Открыть студию", web_app=WebAppInfo(url=mini_app_url))
     builder.button(text="Создать фото", callback_data="menu:image")
-    builder.button(text="AI Video", callback_data="menu:motion")
+    builder.button(text="Создать видео", callback_data="menu:motion")
     builder.button(text="Лента", callback_data="menu:feed")
-    if not mini_app_url:
-        builder.button(text="Баланс", callback_data="menu:balance")
-    builder.button(text="Еще", callback_data="menu:more")
+    builder.button(text="Профиль", callback_data=ACCOUNT_MENU_CALLBACK)
     if mini_app_url:
         builder.adjust(1, 2, 2)
     else:
-        builder.adjust(2, 2, 1)
+        builder.adjust(2, 2)
     return builder.as_markup()
 
 
-def more_menu(is_admin: bool = False, mini_app_url: str | None = None) -> InlineKeyboardMarkup:
+def account_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    if mini_app_url:
-        builder.button(text="🍌 Открыть BANANA", url=mini_app_url)
-    builder.button(text="💰 Баланс", callback_data="menu:balance")
-    builder.button(text="🛒 Пакеты", callback_data="menu:packages")
-    builder.button(text="🤝 Партнерка", callback_data="menu:partners")
-    builder.button(text="🆘 Поддержка", callback_data="menu:support")
+    builder.button(text="Баланс", callback_data="menu:balance")
+    builder.button(text="Пополнить", callback_data="menu:packages")
+    builder.button(text="Партнёрская программа", callback_data="menu:partners")
+    builder.button(text="Поддержка", callback_data="menu:support")
     if is_admin:
-        builder.button(text="⚙️ Админка", callback_data="admin:menu")
+        builder.button(text="Админка", callback_data="admin:menu")
     nav_count = add_navigation_buttons(builder, back_callback=MAIN_MENU_CALLBACK)
-    rows: list[int] = []
-    if mini_app_url:
-        rows.append(1)
-    rows.extend([2, 2])
+    rows = [2, 1, 1]
     if is_admin:
         rows.append(1)
     rows.append(nav_count)
@@ -83,12 +78,27 @@ def more_menu(is_admin: bool = False, mini_app_url: str | None = None) -> Inline
     return builder.as_markup()
 
 
+def more_menu(is_admin: bool = False, mini_app_url: str | None = None) -> InlineKeyboardMarkup:
+    """Backward-compatible alias for the former «Ещё» menu."""
+
+    del mini_app_url
+    return account_menu(is_admin=is_admin)
+
+
+def balance_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Пополнить", callback_data="menu:packages")
+    builder.button(text="Партнёрская программа", callback_data="menu:partners")
+    nav_count = add_navigation_buttons(builder, back_callback=ACCOUNT_MENU_CALLBACK)
+    builder.adjust(2, nav_count)
+    return builder.as_markup()
+
+
 def mini_app_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="BANANA", web_app=WebAppInfo(url=mini_app_url))
-    builder.button(text="Открыть BANANA", url=mini_app_url)
+    builder.button(text="Открыть студию", web_app=WebAppInfo(url=mini_app_url))
     builder.button(text=MAIN_MENU_BUTTON_TEXT, callback_data=MAIN_MENU_CALLBACK)
-    builder.adjust(2, 1)
+    builder.adjust(1, 1)
     return builder.as_markup()
 
 
@@ -155,9 +165,9 @@ def packages_keyboard(packages: list[CreditPackage]) -> InlineKeyboardMarkup:
         amount = package_credits_text(package, short=True)
         builder.button(
             text=f"{package.title} · {amount} · {price}",
-            callback_data=f"pay:package:{package.id}",
+            callback_data=f"pay:preview:{package.id}",
         )
-    nav_count = add_navigation_buttons(builder, back_callback=MAIN_MENU_CALLBACK)
+    nav_count = add_navigation_buttons(builder, back_callback=ACCOUNT_MENU_CALLBACK)
     rows = [1] * len(visible_packages)
     rows.append(nav_count)
     builder.adjust(*rows)
@@ -168,7 +178,7 @@ def partner_keyboard(links: list[PartnerLink]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for link in links:
         builder.button(text=link.title, callback_data=f"partner:open:{link.id}")
-    nav_count = add_navigation_buttons(builder, back_callback=MAIN_MENU_CALLBACK)
+    nav_count = add_navigation_buttons(builder, back_callback=ACCOUNT_MENU_CALLBACK)
     builder.adjust(*([1] * len(links)), nav_count)
     return builder.as_markup()
 

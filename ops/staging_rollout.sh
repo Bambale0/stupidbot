@@ -139,6 +139,10 @@ rm -rf "${candidate}"
 mkdir -p "${candidate}"
 tar -xzf "${archive}" -C "${candidate}"
 python3 -m compileall -q "${candidate}/app" "${candidate}/scripts"
+(
+  cd "${candidate}"
+  python3 scripts/regression_bot_ux.py
+)
 chmod 700 "${candidate}/ops/verify_postgres_restore.sh"
 "${candidate}/ops/verify_postgres_restore.sh" \
   "${DATABASE_URL}" "${db_url}" "${db_backup}" "${candidate}"
@@ -155,6 +159,7 @@ rsync --archive --delete \
 cd "${app_dir}"
 python3 -m compileall -q app scripts
 python3 -m scripts.init_db
+python3 scripts/regression_bot_ux.py
 python3 scripts/admin_smoke.py
 python3 scripts/regression_500_current.py
 python3 scripts/staging_issue3_db_smoke.py
@@ -182,6 +187,7 @@ journalctl -u "${service_name}" --since "5 minutes ago" --no-pager --lines=100 \
 
 echo "Backup directory: ${backup_dir}"
 echo "Database restore verification: passed"
+echo "Bot UX regression: passed"
 echo "Transactional financial smoke: passed"
 echo "Public Mini App smoke: passed"
 echo "Deployed SHA: ${release_sha}"

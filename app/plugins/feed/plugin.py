@@ -19,7 +19,6 @@ from app.repositories import (
     get_feed_tasks,
     get_model,
     get_public_feed_task,
-    increment_feed_share,
     like_feed_task,
     remove_task_from_feed,
     serialize_feed_task,
@@ -64,22 +63,19 @@ async def like_feed_card(callback: CallbackQuery, context: AppContext) -> None:
     async with session_scope(context.session_factory) as session:
         likes, is_new = await like_feed_task(session, task_id=task_id, user_id=user.id)
     if likes is None:
-        await callback.answer("Публикация уже недоступна", show_alert=True)
+        await callback.answer("Работа уже недоступна", show_alert=True)
         return
-    await callback.answer("Лайк засчитан" if is_new else "Вы уже лайкали эту работу")
+    await callback.answer("Лайк добавлен" if is_new else "Вы уже лайкали эту работу")
     if callback.message:
         await _refresh_feed_card(callback.message, context, viewer_user_id=user.id, task_id=task_id)
 
 
 @router.callback_query(F.data.startswith("feed:share:"))
-async def share_feed_card(callback: CallbackQuery, context: AppContext) -> None:
-    task_id = _callback_int(callback.data, "feed:share:", default=0)
-    async with session_scope(context.session_factory) as session:
-        shares = await increment_feed_share(session, task_id)
-    if shares is None:
-        await callback.answer("Публикация уже недоступна", show_alert=True)
-        return
-    await callback.answer("Share засчитан")
+async def legacy_share_feed_card(callback: CallbackQuery, context: AppContext) -> None:
+    """Keep stale keyboards safe without incrementing a fake share counter."""
+
+    await ensure_user_for_callback(callback, context)
+    await callback.answer("Поделиться можно через стандартную кнопку Telegram", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("feed:publish:confirm:"))
@@ -89,7 +85,7 @@ async def publish_confirm(callback: CallbackQuery, context: AppContext) -> None:
     if callback.message:
         await callback.message.answer(
             "Опубликовать работу в ленте?\n\n"
-            "Результат, модель и публичное имя будут видны другим пользователям. Промпт скрыт.",
+            "Другие пользователи увидят результат, модель и ваше публичное имя. Промпт останется скрыт.",
             reply_markup=_publish_confirm_keyboard(task_id),
         )
     await callback.answer()
@@ -102,16 +98,16 @@ async def publish_task(callback: CallbackQuery, context: AppContext) -> None:
     async with session_scope(context.session_factory) as session:
         ok, reason = await share_task_to_feed(session, task_id=task_id, user_id=user.id)
     texts = {
-        "published": "Готово, работа опубликована в ленте.",
-        "not_owner": "Можно публиковать только свои работы.",
-        "not_completed": "Публиковать можно только готовые генерации.",
-        "no_result": "У работы нет результата для публикации.",
-        "foreign_source": "Повтор чужой работы нельзя публиковать как свою.",
+        "published": "Работа опубликована",
+        "not_owner": "Можно публиковать только свои работы",
+        "not_completed": "Генерация ещё не завершена",
+        "no_result": "У работы нет результата",
+        "foreign_source": "Повтор чужой работы нельзя публиковать как свою",
     }
     await callback.answer(texts.get(reason, "Не получилось опубликовать"), show_alert=not ok)
     if callback.message and ok:
         await callback.message.answer(
-            "Работа уже в ленте.", reply_markup=navigation_keyboard(back_callback="menu:feed")
+            "Работа в ленте.", reply_markup=navigation_keyboard(back_callback="menu:feed")
         )
 
 
@@ -121,9 +117,7 @@ async def remove_feed_card(callback: CallbackQuery, context: AppContext) -> None
     task_id = _callback_int(callback.data, "feed:remove:", default=0)
     async with session_scope(context.session_factory) as session:
         removed = await remove_task_from_feed(session, task_id=task_id, user_id=user.id)
-    await callback.answer(
-        "Снято с ленты" if removed else "Не получилось снять публикацию", show_alert=not removed
-    )
+    await callback.answer("Работа снята с ленты" if removed else "Не получилось снять работу", show_alert=not removed)
 
 
 @router.callback_query(F.data.startswith("feed:repeat:"))
@@ -134,7 +128,7 @@ async def repeat_feed_card(callback: CallbackQuery, context: AppContext, state: 
         task = await get_public_feed_task(session, task_id)
         model = await get_model(session, task.model_code) if task else None
     if not task or not model:
-        await callback.answer("Публикация уже недоступна", show_alert=True)
+        await callback.answer("Работа уже недоступна", show_alert=True)
         return
 
     await state.clear()
@@ -148,7 +142,7 @@ async def repeat_feed_card(callback: CallbackQuery, context: AppContext, state: 
             mode=str(payload.get("mode") or "pro"),
             source_feed_task_id=task.id,
         )
-        text = "Повтор из ленты сохранен. Отправьте изображение-референс для видео."
+        text = "Настройки сохранены. Отправьте изображение для своей версии видео."
         back = "menu:motion"
     else:
         await state.set_state(ImageFlow.reference_prompt)
@@ -159,7 +153,7 @@ async def repeat_feed_card(callback: CallbackQuery, context: AppContext, state: 
             resolution=payload.get("resolution") or "2K",
             source_feed_task_id=task.id,
         )
-        text = "Повтор из ленты сохранен. Отправьте фото-референс для изображения."
+        text = "Настройки сохранены. Отправьте фото для своей версии изображения."
         back = "menu:image"
 
     if callback.message:
@@ -178,7 +172,7 @@ async def _send_feed_card(
         tasks = await get_feed_tasks(session, limit=30)
     if not tasks:
         await message.answer(
-            "В публичной ленте пока пусто.",
+            "В ленте пока нет работ.",
             reply_markup=main_menu(
                 is_admin_user(viewer_user, context),
                 mini_app_url=context.settings.mini_app_url,
@@ -233,13 +227,12 @@ async def _deliver_feed_card(
 
 def _feed_caption(row: dict) -> str:
     model = escape(str(row.get("model_code") or "model"))
-    author = str(row.get("author") or "BANANA user")
+    author = escape(str(row.get("author") or "Пользователь BANANA"))
     return (
-        f"<b>BANANA feed</b>\n"
-        f"Автор: {escape(author)}\n"
-        f"Модель: {model}\n"
-        f"Лайки: {int(row.get('likes') or 0)} · Shares: {int(row.get('shares') or 0)}\n\n"
-        "🔄 Нажми «Повторить» чтобы сделать похожее"
+        "<b>Лента BANANA</b>\n"
+        f"{author} · {model}\n"
+        f"Нравится: <b>{int(row.get('likes') or 0)}</b>\n\n"
+        "«Повторить» создаст вашу версию с теми же настройками."
     )
 
 
@@ -247,18 +240,21 @@ def _feed_keyboard(
     task: GenerationTask, *, viewer_user_id: int, index: int, total: int
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"Лайк {int(task.likes_count or 0)}", callback_data=f"feed:like:{task.id}")
-    builder.button(
-        text=f"Share {int(task.shares_count or 0)}", callback_data=f"feed:share:{task.id}"
-    )
+    builder.button(text=f"Нравится · {int(task.likes_count or 0)}", callback_data=f"feed:like:{task.id}")
     repeat_text = "Повторить видео" if generation_media_type(task) == "video" else "Повторить фото"
     builder.button(text=repeat_text, callback_data=f"feed:repeat:{task.id}")
     if total > 1:
         builder.button(text="Следующая", callback_data=f"feed:next:{index + 1}")
     if task.user_id == viewer_user_id:
-        builder.button(text="Снять с ленты", callback_data=f"feed:remove:{task.id}")
-    builder.button(text="Главное меню", callback_data="menu:main")
-    builder.adjust(2, 2, 1, 1)
+        builder.button(text="Убрать из ленты", callback_data=f"feed:remove:{task.id}")
+    builder.button(text="Главная", callback_data="menu:main")
+    rows = [2]
+    if total > 1:
+        rows.append(1)
+    if task.user_id == viewer_user_id:
+        rows.append(1)
+    rows.append(1)
+    builder.adjust(*rows)
     return builder.as_markup()
 
 

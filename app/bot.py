@@ -74,6 +74,11 @@ def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
     for required_plugin in ("feed", "finance"):
         if required_plugin not in context.settings.enabled_plugins:
             context.settings.enabled_plugins.append(required_plugin)
+    # UX patches depend on all feature modules being loaded first.
+    context.settings.enabled_plugins = [
+        name for name in context.settings.enabled_plugins if name != "ux"
+    ]
+    context.settings.enabled_plugins.append("ux")
     dispatcher = Dispatcher(storage=RedisStorage(redis=redis))
     dispatcher.message.middleware(ActionLoggingMiddleware())
     dispatcher.callback_query.middleware(ActionLoggingMiddleware())
@@ -86,17 +91,20 @@ async def register_bot_commands(bot: Bot, settings: Settings) -> None:
     default_commands = [
         BotCommand(command="start", description="Запустить бота"),
         BotCommand(command="menu", description="Главное меню"),
-        BotCommand(command="app", description="Открыть BANANA"),
-        BotCommand(command="image", description="Banana: фото по референсу"),
-        BotCommand(command="motion", description="AI Video: видео по референсу"),
-        BotCommand(command="balance", description="Баланс, лимиты и партнерка"),
+        BotCommand(command="app", description="Открыть студию BANANA"),
+        BotCommand(command="image", description="Создать фото"),
+        BotCommand(command="motion", description="Создать видео"),
+        BotCommand(command="feed", description="Лента работ"),
+        BotCommand(command="balance", description="Баланс"),
         BotCommand(command="packages", description="Пополнить кредиты"),
-        BotCommand(command="gallery", description="Галерея работ"),
-        BotCommand(command="feed", description="Публичная лента"),
-        BotCommand(command="partners", description="Партнерская программа"),
+        BotCommand(command="partners", description="Партнёрская программа"),
         BotCommand(command="help", description="Помощь"),
     ]
-    admin_commands = [*default_commands, BotCommand(command="admin", description="Админка"), BotCommand(command="finance", description="Финансовая аналитика")]
+    admin_commands = [
+        *default_commands,
+        BotCommand(command="admin", description="Управление проектом"),
+        BotCommand(command="finance", description="Финансовая аналитика"),
+    ]
     await bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
     for admin_id in settings.admin_ids:
         await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
