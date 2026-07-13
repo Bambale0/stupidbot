@@ -108,37 +108,60 @@ def _check_admin_information_architecture() -> None:
     ux_plugin._install_admin_navigation()
     home = admin_plugin._admin_keyboard()
     _assert_unique_buttons(home, screen="admin_home")
-    assert _texts(home) == [
-        "Обзор",
-        "Пользователи",
-        "Генерации",
-        "Платежи",
-        "Каталог",
-        "Партнёрка",
-        "Коммуникации",
-        "Система",
-        "Главная",
-    ]
+    assert tuple(zip(_texts(home)[:-1], _callbacks(home)[:-1])) == ux_plugin.ADMIN_HOME_BUTTONS
+    assert _texts(home)[-1] == "Главная"
+    assert _callbacks(home)[-1] == "menu:main"
     assert len(_buttons(home)) == 9
     assert "Финансы" not in _texts(home)
     assert "Начислить" not in _texts(home)
     assert "Бан / Разбан" not in _texts(home)
 
-    sections = {
-        "overview": ux_plugin._section_keyboard(
-            [("Статистика", "admin:stats"), ("Аналитика", "admin:analytics"), ("Финансы", "admin:finance")]
+    expected_sections = {
+        "admin:ux:overview": (
+            "Обзор",
+            ("Статистика", "Аналитика", "Финансы"),
+            ("admin:stats", "admin:analytics", "admin:finance"),
         ),
-        "catalog": ux_plugin._section_keyboard(
-            [("Модели и цены", "admin:models"), ("Пакеты", "admin:packages"), ("Публичные работы", "admin:gallery")]
+        "admin:ux:catalog": (
+            "Каталог",
+            ("Модели и цены", "Пакеты", "Публичные работы"),
+            ("admin:models", "admin:packages", "admin:gallery"),
         ),
-        "affiliate": ux_plugin._section_keyboard(
-            [("Рефералы", "admin:referrals"), ("Заявки на вывод", "admin:withdrawals"), ("Партнёрские ссылки", "admin:partners")]
+        "admin:ux:affiliate": (
+            "Партнёрка",
+            ("Рефералы", "Заявки на вывод", "Партнёрские ссылки"),
+            ("admin:referrals", "admin:withdrawals", "admin:partners"),
+        ),
+        "admin:ux:communications": (
+            "Коммуникации",
+            ("Тексты и настройки", "Обращения", "Рассылка"),
+            ("admin:settings", "admin:support", "admin:broadcast"),
+        ),
+        "admin:ux:system": (
+            "Система",
+            ("Логи ошибок",),
+            ("admin:logs",),
         ),
     }
-    for name, markup in sections.items():
-        _assert_unique_buttons(markup, screen=f"admin_{name}")
+    assert set(ux_plugin.ADMIN_SECTIONS) == set(expected_sections)
+
+    leaf_callbacks: list[str] = []
+    for route, (expected_title, expected_texts, expected_callbacks) in expected_sections.items():
+        title, description, items = ux_plugin.ADMIN_SECTIONS[route]
+        assert title == expected_title
+        assert description.strip()
+        assert tuple(text for text, _ in items) == expected_texts
+        assert tuple(callback for _, callback in items) == expected_callbacks
+        markup = ux_plugin._section_keyboard(items)
+        _assert_unique_buttons(markup, screen=route)
         assert len(_buttons(markup)) <= 5
         assert _callbacks(markup)[-2:] == ["admin:menu", "menu:main"]
+        leaf_callbacks.extend(expected_callbacks)
+
+    assert len(leaf_callbacks) == len(set(leaf_callbacks)), (
+        "admin sections duplicate a leaf action: " + repr(leaf_callbacks)
+    )
+    assert "admin:orders" not in ux_plugin.ADMIN_SECTIONS["admin:ux:system"][2]
 
 
 def _check_source_contracts() -> None:
@@ -146,12 +169,15 @@ def _check_source_contracts() -> None:
     gallery_source = Path("app/plugins/gallery/plugin.py").read_text(encoding="utf-8")
     core_source = Path("app/plugins/core/plugin.py").read_text(encoding="utf-8")
     finance_source = Path("app/plugins/finance/plugin.py").read_text(encoding="utf-8")
+    payments_source = Path("app/plugins/payments/plugin.py").read_text(encoding="utf-8")
 
     assert "increment_feed_share" not in feed_source
     assert 'text=f"Share' not in feed_source
     assert "Галерея объединена с лентой" in gallery_source
     assert 'F.data.in_({"menu:account", "menu:more"})' in core_source
     assert "_install_admin_finance_button" not in finance_source
+    assert 'F.data.startswith("pay:create:")' in payments_source
+    assert 'F.data.startswith("pay:package:")' in payments_source
 
     ux_plugin._install_generation_navigation()
     ux_plugin._install_feed_refresh()
