@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from aiogram import Dispatcher, F, Router
+from contextlib import suppress
+
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
@@ -146,6 +148,59 @@ def _install_generation_navigation() -> None:
     generation_plugin._send_image_request_screen = wrapped
 
 
+async def _start_image_status_after_prompt(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+) -> int:
+    """Create the mutable generation status below the user's prompt message."""
+
+    data = await state.get_data()
+    previous_status_message_id = data.get("status_message_id")
+    status_message = await message.answer(
+        _generation_status_text("Готовлю референсы", 45)
+    )
+    await state.update_data(status_message_id=status_message.message_id)
+
+    if (
+        isinstance(previous_status_message_id, int)
+        and previous_status_message_id != status_message.message_id
+    ):
+        with suppress(TelegramBadRequest):
+            await bot.edit_message_reply_markup(
+                chat_id=message.chat.id,
+                message_id=previous_status_message_id,
+                reply_markup=None,
+            )
+    return status_message.message_id
+
+
+def _generation_status_text(title: str, percent: int) -> str:
+    from app.plugins.generation import plugin as generation_plugin
+
+    return generation_plugin._status_text(title, percent)
+
+
+def _install_generation_status_after_prompt() -> None:
+    from app.plugins.generation import plugin as generation_plugin
+
+    original = generation_plugin._submit_image_task_from_message
+    if getattr(original, "_ux_status_after_prompt_installed", False):
+        return
+
+    async def wrapped(
+        message: Message,
+        context: AppContext,
+        state: FSMContext,
+        bot: Bot,
+    ) -> None:
+        await _start_image_status_after_prompt(message, state, bot)
+        await original(message, context, state, bot)
+
+    setattr(wrapped, "_ux_status_after_prompt_installed", True)
+    generation_plugin._submit_image_task_from_message = wrapped
+
+
 def _install_feed_refresh() -> None:
     from app.plugins.feed import plugin as feed_plugin
 
@@ -193,5 +248,6 @@ def setup(dispatcher: Dispatcher, context: AppContext) -> None:
     del context
     _install_admin_navigation()
     _install_generation_navigation()
+    _install_generation_status_after_prompt()
     _install_feed_refresh()
     dispatcher.include_router(router)
