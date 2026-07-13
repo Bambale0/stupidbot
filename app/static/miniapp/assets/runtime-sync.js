@@ -29,14 +29,35 @@ function stripStaticPrice(text) {
     .trim();
 }
 
+function patchLiteModelUi() {
+  document.querySelectorAll('[data-model="nano-banana"]').forEach((button) => {
+    const title = button.querySelector("span");
+    const details = button.querySelector("small");
+    if (title) title.textContent = "Nano Banana 2 Lite · 1K";
+    if (details) details.textContent = "1K · до 10 фото-референсов";
+  });
+
+  document.querySelectorAll('.select-button [data-model], .select-button span').forEach((element) => {
+    const text = element.textContent || "";
+    if (/^⚙\s*banana\s*·\s*2k\/4k/i.test(text)) {
+      element.textContent = "⚙ Nano Banana 2 Lite · 1K";
+    }
+  });
+}
+
 function patchRuntimeUi() {
   document.querySelectorAll(".custom-credit-panel").forEach((element) => element.remove());
   document.querySelectorAll(".tariff-card").forEach((element) => {
     if (/безлимит/i.test(element.textContent || "")) element.remove();
   });
+  document.querySelectorAll('[data-action="subscription"]').forEach((button) => {
+    button.closest(".info-card")?.remove();
+  });
+  patchLiteModelUi();
   const balanceButton = document.querySelector(".balance-pill");
   if (balanceButton) balanceButton.textContent = "Пополнить";
   document.querySelectorAll(".model-option small").forEach((element) => {
+    if (element.closest('[data-model="nano-banana"]')) return;
     const clean = stripStaticPrice(element.textContent);
     element.textContent = clean || "Цена подтвердится в Telegram";
   });
