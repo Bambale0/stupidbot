@@ -66,6 +66,7 @@ class Settings(BaseSettings):
         default_factory=lambda: [
             "core",
             "generation",
+            "references",
             "gallery",
             "feed",
             "partners",
