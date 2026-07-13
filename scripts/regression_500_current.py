@@ -28,6 +28,8 @@ from app.services.payments import (  # noqa: E402
 from app.services.tbank import TBankClient  # noqa: E402
 import scripts.regression_500 as legacy  # noqa: E402
 
+LEGACY_STATIC_LOGIC = legacy._check_static_logic
+
 
 async def _check_current_payment_creation(
     regression: legacy.Regression,
@@ -208,11 +210,10 @@ def _legacy_main_menu_compat(is_admin: bool = False, mini_app_url: str | None = 
 
 
 def _check_current_static_logic(regression: legacy.Regression) -> None:
-    original = legacy._check_static_logic
     current_main_menu = legacy.main_menu
     legacy.main_menu = _legacy_main_menu_compat
     try:
-        original(regression)
+        LEGACY_STATIC_LOGIC(regression)
     finally:
         legacy.main_menu = current_main_menu
 
