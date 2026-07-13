@@ -4,11 +4,12 @@ import asyncio
 import logging
 from typing import Any, Awaitable
 
-from fastapi import HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 READINESS_TIMEOUT_SECONDS = 3.0
+_INSTALL_MARKER = "_stupidbot_http_readiness_installed"
 
 
 async def _check_database(engine: Any) -> None:
@@ -63,3 +64,26 @@ async def readiness_response(request: Request) -> dict[str, Any]:
     if payload["status"] != "ready":
         raise HTTPException(status_code=503, detail=payload)
     return payload
+
+
+def install_http_readiness_route() -> None:
+    """Register `/ready` on FastAPI instances created after application bootstrap."""
+
+    if getattr(FastAPI, _INSTALL_MARKER, False):
+        return
+
+    original_init = FastAPI.__init__
+
+    def init_with_readiness(self: FastAPI, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        if not any(getattr(route, "path", None) == "/ready" for route in self.routes):
+            self.add_api_route(
+                "/ready",
+                readiness_response,
+                methods=["GET"],
+                tags=["operations"],
+                summary="Runtime readiness",
+            )
+
+    FastAPI.__init__ = init_with_readiness  # type: ignore[method-assign]
+    setattr(FastAPI, _INSTALL_MARKER, True)
