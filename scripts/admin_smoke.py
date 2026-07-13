@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from scripts.admin_smoke_current import amain, main
+import app.bot  # noqa: F401,E402
+
+from scripts.admin_smoke_current import amain, main  # noqa: E402
 
 __all__ = ["amain", "main"]
 
