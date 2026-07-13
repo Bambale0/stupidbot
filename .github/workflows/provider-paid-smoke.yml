@@ -131,8 +131,15 @@ jobs:
         run: |
           set -Eeuo pipefail
           result=failed
-          if [[ -f provider-paid-smoke.log ]] \
-            && grep -q 'Paid smoke passed:' provider-paid-smoke.log; then
+          expected=1
+          if [[ "${SMOKE_PROVIDER}" == "both" ]]; then
+            expected=2
+          fi
+          passed_count=0
+          if [[ -f provider-paid-smoke.log ]]; then
+            passed_count=$(grep -c '^Paid smoke passed:' provider-paid-smoke.log || true)
+          fi
+          if [[ "${JOB_STATUS}" == "success" && "${passed_count}" -eq "${expected}" ]]; then
             result=passed
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -140,6 +147,7 @@ jobs:
           ## Provider paid smoke: ${result}
 
           - Provider: \`${SMOKE_PROVIDER}\`
+          - Provider checks passed: \`${passed_count}/${expected}\`
           - GitHub job status: \`${JOB_STATUS}\`
           - Run: ${run_url}
           - Billable provider calls: explicitly approved by workflow input
