@@ -50,4 +50,16 @@ jobs:
       - name: Apply Alembic migrations
         run: python -m scripts.migrate_db
       - name: Financial regression
-        run: python scripts/regression_financial.py
+        run: |
+          set +e
+          python scripts/regression_financial.py > financial-regression.log 2>&1
+          status=$?
+          cat financial-regression.log
+          exit $status
+      - name: Upload financial regression log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial-regression-log
+          path: financial-regression.log
+          if-no-files-found: warn
