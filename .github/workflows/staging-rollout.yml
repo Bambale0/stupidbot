@@ -1,0 +1,202 @@
+name: Staging rollout gate
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: stupidbot-staging-rollout
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate candidate on PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: stupidbot_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d stupidbot_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: ci
+      DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/stupidbot_ci
+      PHOTO_CREDIT_VALUE_KOPECKS: "3900"
+      VIDEO_CREDIT_VALUE_KOPECKS: "10000"
+      CUSTOM_CREDIT_SALES_ENABLED: "false"
+      UNLIMITED_SALES_ENABLED: "false"
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          set -Eeuo pipefail
+          python -m pip install -U pip setuptools wheel
+          python -m pip install -e ".[dev]"
+
+      - name: Compile
+        run: python -m compileall -q app scripts
+
+      - name: Apply Alembic migrations
+        run: python -m scripts.migrate_db
+
+      - name: Financial regression
+        run: python scripts/regression_financial.py
+
+  rollout:
+    name: Backup, migrate and smoke staging
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    env:
+      STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+      STAGING_SSH_PORT: ${{ secrets.STAGING_SSH_PORT }}
+      STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+      STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+      STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+      STAGING_APP_DIR: /root/stupidbot
+    steps:
+      - name: Checkout validated candidate
+        uses: actions/checkout@v4
+
+      - name: Verify staging access configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          for name in \
+            STAGING_SSH_HOST \
+            STAGING_SSH_USER \
+            STAGING_SSH_PRIVATE_KEY \
+            STAGING_SSH_KNOWN_HOSTS
+          do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("${name}")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required staging secrets: %s\n' "${missing[*]}" >&2
+            exit 78
+          fi
+          echo "STAGING_SSH_PORT=${STAGING_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+
+      - name: Package immutable candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tar \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='.venv' \
+            --exclude='backups' \
+            --exclude='.release' \
+            -czf stupidbot-source.tar.gz .
+          sha256sum stupidbot-source.tar.gz > stupidbot-source.tar.gz.sha256
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Transfer candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
+          ssh -p "${STAGING_SSH_PORT}" "${remote}" \
+            "mkdir -p '${STAGING_APP_DIR}/.release'"
+          scp -P "${STAGING_SSH_PORT}" \
+            stupidbot-source.tar.gz \
+            stupidbot-source.tar.gz.sha256 \
+            ops/staging_rollout.sh \
+            "${remote}:${STAGING_APP_DIR}/.release/"
+
+      - name: Backup, migrate and deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
+          ssh -p "${STAGING_SSH_PORT}" "${remote}" bash -s -- \
+            "${STAGING_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee staging-rollout.log
+          set -Eeuo pipefail
+          app_dir=$1
+          release_sha=$2
+          cd "${app_dir}/.release"
+          chmod 700 staging_rollout.sh
+          ./staging_rollout.sh "${app_dir}" "${release_sha}"
+          REMOTE
+
+      - name: Verify public health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          response=$(curl --fail --silent --show-error --max-time 15 \
+            https://stupid.chillcreative.ru/health)
+          [[ "${response}" == *'"status":"ok"'* || "${response}" == *'"status": "ok"'* ]]
+
+      - name: Upload rollout evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stupidbot-staging-rollout-${{ github.sha }}
+          path: |
+            staging-rollout.log
+            stupidbot-source.tar.gz.sha256
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish rollout status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -Eeuo pipefail
+          automated_gate=failed
+          if [[ -f staging-rollout.log ]] \
+            && grep -q 'Automated staging rollout passed' staging-rollout.log; then
+            automated_gate=passed
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          cat > rollout-status.md <<EOF
+          ## Staging rollout: ${automated_gate}
+
+          - SHA: \`${GITHUB_SHA}\`
+          - Branch: \`${GITHUB_REF_NAME}\`
+          - GitHub job status: \`${JOB_STATUS}\`
+          - Backup/migration/restart/health gate: \`${automated_gate}\`
+          - Run: ${run_url}
+
+          Evidence is stored in the workflow artifact. Secret values are not included.
+          EOF
+          gh issue comment 3 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file rollout-status.md
