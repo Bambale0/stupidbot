@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -18,6 +19,7 @@ from app.plugins.references.plugin import (
     submit_image_from_settings,
 )
 from app.ui import model_keyboard
+from scripts.regression_backend_contracts import amain as backend_contract_regression
 
 
 def _image_task(
@@ -147,7 +149,8 @@ def main() -> None:
     assert 'F.data == "image:submit"' in source
     assert 'GenerationTask.user_id == user_id' in source
 
-    print("Reference reuse regression passed")
+    asyncio.run(backend_contract_regression())
+    print("Reference reuse and backend contract regression passed")
 
 
 if __name__ == "__main__":
