@@ -14,23 +14,14 @@ command -v pg_restore >/dev/null
 
 restore_db_name="stupidbot_restore_$(date -u +%Y%m%d_%H%M%S)_${RANDOM}"
 restore_created=0
+restore_create_mode="app"
 
-cleanup() {
-  status=$?
-  if (( restore_created == 1 )); then
-    dropdb --if-exists --maintenance-db="${maintenance_database_url}" "${restore_db_name}" \
-      >/dev/null 2>&1 || true
-  fi
-  exit "${status}"
-}
-trap cleanup EXIT
-
-mapfile -t restore_urls < <(
+mapfile -t connection_parts < <(
   ORIGINAL_DATABASE_URL="${original_database_url}" \
   RESTORE_DB_NAME="${restore_db_name}" \
   python3 - <<'PY'
 import os
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 original = os.environ["ORIGINAL_DATABASE_URL"]
 name = os.environ["RESTORE_DB_NAME"]
@@ -42,14 +33,71 @@ for suffix in ("+asyncpg", "+psycopg", "+psycopg2"):
 sync_url = urlunsplit((sync_scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))
 print(async_url)
 print(sync_url)
+print(unquote(parts.username or ""))
+print(parts.hostname or "")
 PY
 )
-restore_async_url=${restore_urls[0]}
-restore_sync_url=${restore_urls[1]}
+restore_async_url=${connection_parts[0]}
+restore_sync_url=${connection_parts[1]}
+restore_owner=${connection_parts[2]}
+database_host=${connection_parts[3]}
+
+run_as_postgres() {
+  if [[ $(id -u) -eq 0 ]]; then
+    if command -v runuser >/dev/null; then
+      runuser -u postgres -- "$@"
+      return
+    fi
+    echo "runuser is required for local PostgreSQL superuser fallback" >&2
+    return 1
+  fi
+  if command -v sudo >/dev/null && sudo -n -u postgres true >/dev/null 2>&1; then
+    sudo -n -u postgres -- "$@"
+    return
+  fi
+  echo "Passwordless access to local PostgreSQL OS user is unavailable" >&2
+  return 1
+}
+
+drop_restore_database() {
+  if [[ "${restore_create_mode}" == "postgres" ]]; then
+    run_as_postgres dropdb --if-exists "${restore_db_name}"
+  else
+    dropdb --if-exists --maintenance-db="${maintenance_database_url}" "${restore_db_name}"
+  fi
+}
+
+cleanup() {
+  status=$?
+  if (( restore_created == 1 )); then
+    drop_restore_database >/dev/null 2>&1 || true
+  fi
+  exit "${status}"
+}
+trap cleanup EXIT
 
 printf 'Creating isolated restore database %s\n' "${restore_db_name}"
-createdb --maintenance-db="${maintenance_database_url}" "${restore_db_name}"
+if createdb --maintenance-db="${maintenance_database_url}" "${restore_db_name}" 2>/tmp/stupidbot-createdb-error.log; then
+  restore_create_mode="app"
+else
+  cat /tmp/stupidbot-createdb-error.log >&2
+  case "${database_host}" in
+    ""|localhost|127.0.0.1|::1) ;;
+    *)
+      echo "Application role cannot create databases and PostgreSQL is not local; configure a dedicated restore database" >&2
+      exit 1
+      ;;
+  esac
+  [[ -n "${restore_owner}" ]] || {
+    echo "Cannot determine application PostgreSQL role from DATABASE_URL" >&2
+    exit 1
+  }
+  echo "Application role lacks CREATEDB; using local PostgreSQL owner fallback"
+  run_as_postgres createdb --owner="${restore_owner}" "${restore_db_name}"
+  restore_create_mode="postgres"
+fi
 restore_created=1
+rm -f /tmp/stupidbot-createdb-error.log
 
 pg_restore --exit-on-error --no-owner --no-privileges \
   --dbname="${restore_sync_url}" "${dump_file}"
@@ -61,6 +109,6 @@ pg_restore --exit-on-error --no-owner --no-privileges \
 )
 
 printf 'PostgreSQL restore verification passed for %s\n' "${restore_db_name}"
-dropdb --maintenance-db="${maintenance_database_url}" "${restore_db_name}"
+drop_restore_database
 restore_created=0
 trap - EXIT
