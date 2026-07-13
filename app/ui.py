@@ -143,8 +143,15 @@ def model_keyboard(
             text=f"{model.title} · {model_price_text(model, short=True)}{unit}",
             callback_data=f"{prefix}:{model.code}",
         )
+    has_image_models = any(model.category == "image" for model in models)
+    if prefix == "gen:model" and has_image_models:
+        builder.button(text="Мои референсы", callback_data="menu:references")
     nav_count = add_navigation_buttons(builder, back_callback=back_callback)
-    builder.adjust(*([1] * len(models)), nav_count)
+    rows = [1] * len(models)
+    if prefix == "gen:model" and has_image_models:
+        rows.append(1)
+    rows.append(nav_count)
+    builder.adjust(*rows)
     return builder.as_markup()
 
 
