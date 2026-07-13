@@ -28,6 +28,7 @@ from app.plugins.admin import plugin as admin_plugin
 from app.repositories import (
     apply_affiliate_commission,
     charge_user_for_model,
+    ensure_defaults,
     get_feed_tasks,
     increment_feed_share,
     like_feed_task,
@@ -70,6 +71,9 @@ async def _check_database_workflows() -> None:
         session_factory = async_sessionmaker(conn, expire_on_commit=False, autoflush=False)
         try:
             async with session_factory() as session:
+                await ensure_defaults(session, settings.admin_ids)
+                await session.flush()
+
                 suffix = uuid4().hex[:10]
                 admin_user = User(telegram_id=int(f"9001{suffix[:6]}", 16), is_admin=True)
                 regular_user = User(telegram_id=int(f"9002{suffix[:6]}", 16), is_admin=False)
