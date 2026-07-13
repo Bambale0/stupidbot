@@ -1,10 +1,10 @@
 export const MODEL_CATALOG = {
   "nano-banana": {
     kind: "image",
-    label: "Banana",
-    providerKey: "gemini-3.1-flash-image-preview",
+    label: "Nano Banana 2 Lite",
+    providerKey: "nano-banana-2-lite",
     price: 2,
-    maxImages: 1,
+    maxImages: 10,
   },
   "nano-banana-pro": {
     kind: "image",
