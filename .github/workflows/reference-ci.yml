@@ -55,25 +55,7 @@ jobs:
         run: python scripts/reference_regression.py
 
       - name: Admin smoke
-        id: admin_smoke
-        continue-on-error: true
-        run: python scripts/admin_smoke.py > admin-smoke.log 2>&1
-
-      - name: Upload admin smoke log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: admin-smoke-log
-          path: admin-smoke.log
-          if-no-files-found: error
-          retention-days: 3
+        run: python scripts/admin_smoke.py
 
       - name: Main regression
-        if: steps.admin_smoke.outcome == 'success'
         run: python scripts/regression_500.py
-
-      - name: Report admin smoke failure
-        if: steps.admin_smoke.outcome == 'failure'
-        run: |
-          tail -n 80 admin-smoke.log
-          exit 1
