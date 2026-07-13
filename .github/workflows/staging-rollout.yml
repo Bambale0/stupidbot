@@ -106,13 +106,10 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          tar \
-            --exclude='.git' \
-            --exclude='.env' \
-            --exclude='.venv' \
-            --exclude='backups' \
-            --exclude='.release' \
-            -czf stupidbot-source.tar.gz .
+          git archive \
+            --format=tar.gz \
+            --output=stupidbot-source.tar.gz \
+            "${GITHUB_SHA}"
           sha256sum stupidbot-source.tar.gz > stupidbot-source.tar.gz.sha256
 
       - name: Configure SSH
