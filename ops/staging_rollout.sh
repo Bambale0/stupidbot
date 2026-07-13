@@ -145,6 +145,7 @@ python3 -m compileall -q "${candidate}/app" "${candidate}/scripts"
   python3 scripts/regression_deployment_safety.py
   python3 scripts/regression_bot_ux.py
   python3 scripts/regression_gallery_compat.py
+  python3 scripts/runtime_readiness.py
 )
 chmod 700 "${candidate}/ops/verify_postgres_restore.sh"
 "${candidate}/ops/verify_postgres_restore.sh" \
@@ -165,10 +166,12 @@ python3 -m scripts.init_db
 python3 scripts/regression_deployment_safety.py
 python3 scripts/regression_bot_ux.py
 python3 scripts/regression_gallery_compat.py
+python3 scripts/runtime_readiness.py
 python3 scripts/admin_smoke.py
 python3 scripts/regression_500_current.py
 python3 scripts/staging_issue3_db_smoke.py
 restart_service
+python3 scripts/runtime_readiness.py
 
 health_url=${STUPIDBOT_LOCAL_HEALTH_URL:-http://127.0.0.1:8092/health}
 for attempt in $(seq 1 20); do
@@ -194,6 +197,7 @@ journalctl -u "${service_name}" --since "5 minutes ago" --no-pager --lines=100 \
 echo "Backup directory: ${backup_dir}"
 echo "Database restore verification: passed"
 echo "Deployment safety regression: passed"
+echo "Runtime readiness: passed"
 echo "Bot UX regression: passed"
 echo "Transactional financial smoke: passed"
 echo "Public Mini App smoke: passed"
