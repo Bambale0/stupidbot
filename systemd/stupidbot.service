@@ -1,16 +1,21 @@
 [Unit]
 Description=StupidBot Telegram webhook bot
-After=network.target postgresql@14-main.service redis-server.service
-Requires=postgresql@14-main.service redis-server.service
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=/root/stupidbot
 EnvironmentFile=/root/stupidbot/.env
-ExecStartPre=/usr/bin/python3 -m scripts.init_db
-ExecStart=/usr/bin/python3 -m app.main
+ExecStartPre=/root/stupidbot/.venv/bin/python -m scripts.init_db
+ExecStartPre=/root/stupidbot/.venv/bin/python scripts/runtime_readiness.py
+ExecStart=/root/stupidbot/.venv/bin/python -m app.main
 Restart=always
 RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
