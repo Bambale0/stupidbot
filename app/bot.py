@@ -13,10 +13,12 @@ from redis.asyncio import Redis
 
 from app.config import Settings
 from app.context import AppContext
+from app.readiness import install_http_readiness_route
 from app.services.financial_settings import validate_production_security
 from app.services.referrals import install_repository_patches
 
 install_repository_patches()
+install_http_readiness_route()
 
 from app.plugins.loader import load_plugins  # noqa: E402
 
