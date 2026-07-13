@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+if __package__ in {None, ""}:
+    from _bootstrap import add_project_root_to_path
+
+    add_project_root_to_path()
+
 import scripts.sqlite_jsonb_compat  # noqa: F401,E402
 import app.bot  # noqa: F401,E402
 
