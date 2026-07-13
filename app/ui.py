@@ -29,6 +29,9 @@ def model_price_text(model: GenerationModel, *, short: bool = False) -> str:
 
 def package_credits_text(package: CreditPackage, *, short: bool = False) -> str:
     parts: list[str] = []
+    if package.is_unlimited:
+        days = int(package.duration_days or 0)
+        parts.append("∞" if short else f"безлимит на {days} д.")
     photo_credits = int(getattr(package, "photo_credits", 0) or 0)
     video_credits = int(getattr(package, "video_credits", 0) or 0)
     common_credits = int(package.credits or 0)
@@ -43,6 +46,7 @@ def package_credits_text(package: CreditPackage, *, short: bool = False) -> str:
 
 
 def main_menu(is_admin: bool = False, mini_app_url: str | None = None) -> InlineKeyboardMarkup:
+    del is_admin
     builder = InlineKeyboardBuilder()
     if mini_app_url:
         builder.button(text="Открыть студию", web_app=WebAppInfo(url=mini_app_url))
