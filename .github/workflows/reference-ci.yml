@@ -34,5 +34,14 @@ jobs:
           python -m pip install -U pip setuptools wheel
           python -m pip install -e ".[dev]"
 
-      - name: Run project checks
-        run: bash scripts/ci.sh
+      - name: Compile
+        run: python -m compileall -q app scripts
+
+      - name: Reference regression
+        run: python scripts/reference_regression.py
+
+      - name: Admin smoke
+        run: python scripts/admin_smoke.py
+
+      - name: Main regression
+        run: python scripts/regression_500.py
