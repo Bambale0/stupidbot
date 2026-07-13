@@ -241,6 +241,16 @@ async def read_status(args: argparse.Namespace) -> None:
         await engine.dispose()
 
 
+async def _stored_reversal_callback(factory, payment_id: int) -> tuple[str, dict[str, object] | None]:
+    async with session_scope(factory) as session:
+        payment = await session.get(Payment, payment_id)
+        if not payment:
+            raise RuntimeError("Smoke payment disappeared while waiting for reversal webhook")
+        raw = dict(payment.raw_payload or {})
+        callback = raw.get("reversal_callback")
+        return payment.status, callback if isinstance(callback, dict) else None
+
+
 async def refund_payment(args: argparse.Namespace) -> None:
     if args.confirm != REFUND_CONFIRMATION:
         raise RuntimeError(f"refund requires --confirm {REFUND_CONFIRMATION}")
@@ -267,76 +277,81 @@ async def refund_payment(args: argparse.Namespace) -> None:
             raise RuntimeError(
                 f"Full refund smoke requires provider status CONFIRMED, got {provider_status}"
             )
-
-        if args.simulate_spent:
-            async with session_scope(factory) as session:
-                current = await session.get(Payment, payment.id, with_for_update=True)
-                if not current or current.status != "paid":
-                    raise RuntimeError("DB payment must be paid before spent-credit simulation")
-                buyer = await session.get(User, current.user_id, with_for_update=True)
-                referrer = (
-                    await session.get(
-                        User,
-                        current.affiliate_commission_user_id,
-                        with_for_update=True,
-                    )
-                    if current.affiliate_commission_user_id
-                    else None
-                )
-                if not buyer or int(buyer.photo_credits_balance or 0) < 1:
-                    raise RuntimeError("Smoke buyer does not have the granted photo credit")
-                buyer.photo_credits_balance = int(buyer.photo_credits_balance or 0) - 1
-                if referrer and int(current.affiliate_commission_kopecks or 0) > 0:
-                    commission = int(current.affiliate_commission_kopecks or 0)
-                    if int(referrer.affiliate_balance_kopecks or 0) < commission:
-                        raise RuntimeError("Smoke referrer commission is not fully available")
-                    referrer.affiliate_balance_kopecks = (
-                        int(referrer.affiliate_balance_kopecks or 0) - commission
-                    )
+        before = await _state_summary(factory, client, payment.order_id)
+        if before["db_status"] != "paid":
+            raise RuntimeError("DB payment must be paid before a live refund smoke")
+        if int(before["buyer_photo_balance"] or 0) != 1:
+            raise RuntimeError("Smoke buyer must have the single granted photo credit")
+        if int(before["affiliate_commission_kopecks"] or 0) <= 0:
+            raise RuntimeError("Smoke payment must have an affiliate commission")
 
         await client.cancel_payment(payment.provider_payment_id)
         deadline = asyncio.get_running_loop().time() + max(30, int(args.timeout_seconds))
         final_state: dict[str, object] | None = None
+        real_callback: dict[str, object] | None = None
         while asyncio.get_running_loop().time() < deadline:
             candidate = await client.get_state(payment.provider_payment_id)
-            status = str(candidate.get("Status") or "").upper()
-            if status in FINAL_REFUND_STATES:
+            candidate_status = str(candidate.get("Status") or "").upper()
+            db_status, stored_callback = await _stored_reversal_callback(factory, payment.id)
+            if (
+                candidate_status in FINAL_REFUND_STATES
+                and db_status == "reversed"
+                and stored_callback is not None
+            ):
                 final_state = candidate
+                real_callback = stored_callback
                 break
             await asyncio.sleep(5)
-        if final_state is None:
-            raise TimeoutError("T-Bank full refund did not reach REFUNDED/REVERSED")
+        if final_state is None or real_callback is None:
+            raise TimeoutError(
+                "T-Bank refund did not produce both a final provider state and a real reversal webhook"
+            )
 
         final_status = str(final_state.get("Status") or "").upper()
-        callback = client.sign_payload(
-            {
-                "TerminalKey": client.terminal_key,
-                "OrderId": payment.order_id,
-                "PaymentId": payment.provider_payment_id,
-                "Amount": payment.amount_kopecks,
-                "Success": True,
-                "Status": final_status,
-                "ErrorCode": "0",
-            }
-        )
-        if not await payment_service.handle_tbank_notification(context, callback):
-            raise RuntimeError("First full-refund callback replay was rejected")
-        if not await payment_service.handle_tbank_notification(context, callback):
-            raise RuntimeError("Second full-refund callback replay was rejected")
+        callback_status = str(real_callback.get("Status") or "").upper()
+        if callback_status != final_status:
+            raise RuntimeError(
+                f"Real reversal webhook status {callback_status} does not match provider state {final_status}"
+            )
+        if not client.verify_notification(real_callback):
+            raise RuntimeError("Stored real reversal webhook has an invalid signature")
+        if str(real_callback.get("OrderId") or "") != payment.order_id:
+            raise RuntimeError("Stored reversal webhook OrderId mismatch")
+        if str(real_callback.get("PaymentId") or "") != payment.provider_payment_id:
+            raise RuntimeError("Stored reversal webhook PaymentId mismatch")
 
-        summary = await _state_summary(factory, client, payment.order_id)
+        summary_before_replay = await _state_summary(factory, client, payment.order_id)
+        if not await payment_service.handle_tbank_notification(context, real_callback):
+            raise RuntimeError("Duplicate replay of the real reversal webhook was rejected")
+        summary_after_replay = await _state_summary(factory, client, payment.order_id)
+        stable_fields = (
+            "db_status",
+            "buyer_photo_balance",
+            "buyer_photo_debt",
+            "affiliate_commission_kopecks",
+            "affiliate_reversed_kopecks",
+            "referrer_balance_kopecks",
+            "referrer_debt_kopecks",
+        )
+        for field in stable_fields:
+            if summary_after_replay[field] != summary_before_replay[field]:
+                raise RuntimeError(f"Duplicate reversal webhook changed {field}")
+
+        summary = summary_after_replay
         if summary["db_status"] != "reversed":
             raise RuntimeError(f"Expected db_status=reversed, got {summary['db_status']}")
+        if int(summary["buyer_photo_balance"] or 0) != 0:
+            raise RuntimeError("Full refund did not remove the granted photo credit")
+        if int(summary["buyer_photo_debt"] or 0) != 0:
+            raise RuntimeError("Unused smoke credit unexpectedly became debt")
         if int(summary["affiliate_reversed_kopecks"] or 0) != int(
             summary["affiliate_commission_kopecks"] or 0
         ):
             raise RuntimeError("Affiliate commission was not fully reversed")
-        if args.simulate_spent:
-            if int(summary["buyer_photo_debt"] or 0) != 1:
-                raise RuntimeError("Spent photo credit did not become debt")
-            expected_affiliate_debt = int(summary["affiliate_commission_kopecks"] or 0)
-            if int(summary["referrer_debt_kopecks"] or 0) != expected_affiliate_debt:
-                raise RuntimeError("Withdrawn affiliate commission did not become debt")
+        if int(summary["referrer_balance_kopecks"] or 0) != 0:
+            raise RuntimeError("Available affiliate commission remained after full refund")
+        if int(summary["referrer_debt_kopecks"] or 0) != 0:
+            raise RuntimeError("Unused smoke commission unexpectedly became affiliate debt")
         print("TBANK_SMOKE_REFUND=" + json.dumps(summary, ensure_ascii=False, sort_keys=True))
     finally:
         await engine.dispose()
@@ -358,5 +373,4 @@ if __name__ == "__main__":
     parser.add_argument("--order-id")
     parser.add_argument("--amount-kopecks", type=int, default=1000)
     parser.add_argument("--timeout-seconds", type=int, default=180)
-    parser.add_argument("--simulate-spent", action="store_true")
     asyncio.run(amain(parser.parse_args()))
