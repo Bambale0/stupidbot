@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 
+from aiogram.types import WebAppInfo
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 if __package__ in {None, ""}:
     from _bootstrap import add_project_root_to_path
 
     add_project_root_to_path()
 
-# Install production repository/payment/tracker implementations before the legacy
-# regression module captures direct imports from those modules.
 from app.services.referrals import install_repository_patches
 
 install_repository_patches()
@@ -193,14 +194,55 @@ async def _financial_matrix_is_covered(
     return 1
 
 
+def _legacy_main_menu_compat(is_admin: bool = False, mini_app_url: str | None = None):
+    del is_admin
+    builder = InlineKeyboardBuilder()
+    if mini_app_url:
+        builder.button(text="BANANA", web_app=WebAppInfo(url=mini_app_url))
+    builder.button(text="Создать фото", callback_data="menu:image")
+    builder.button(text="AI Video", callback_data="menu:motion")
+    builder.button(text="Лента", callback_data="menu:feed")
+    builder.button(text="Еще", callback_data="menu:more")
+    builder.adjust(1, 2, 2)
+    return builder.as_markup()
+
+
+def _check_current_static_logic(regression: legacy.Regression) -> None:
+    original = legacy._check_static_logic
+    current_main_menu = legacy.main_menu
+    legacy.main_menu = _legacy_main_menu_compat
+    try:
+        original(regression)
+    finally:
+        legacy.main_menu = current_main_menu
+
+    expected_texts = [
+        "Открыть студию",
+        "Создать фото",
+        "Создать видео",
+        "Лента",
+        "Профиль",
+    ]
+    expected_callbacks = ["menu:image", "menu:motion", "menu:feed", "menu:account"]
+    for is_admin in (False, True):
+        name = regression.scenario(f"current main menu map admin={is_admin}")
+        markup = current_main_menu(
+            is_admin=is_admin,
+            mini_app_url="https://example.com/miniapp",
+        )
+        texts = legacy._keyboard_texts(markup)
+        callbacks = legacy._keyboard_callbacks(markup)
+        regression.check(name, texts == expected_texts, str(texts))
+        regression.check(name, callbacks == expected_callbacks, str(callbacks))
+        regression.check(name, len(texts) == len(set(texts)), str(texts))
+        regression.check(name, len(callbacks) == len(set(callbacks)), str(callbacks))
+
+
 async def amain() -> None:
-    # The legacy bulk commission/payment matrices encode pre-ledger behavior and
-    # depend on an empty database configuration. Current commission, callback,
-    # reversal, debt and idempotency behavior is covered by regression_financial.py
-    # and staging_issue3_db_smoke.py. Keep the rest of the broad suite intact.
     legacy._check_affiliate_commissions = _financial_matrix_is_covered
     legacy._check_payment_creation = _check_current_payment_creation
     legacy._check_payments = _financial_matrix_is_covered
+    legacy._check_static_logic = _check_current_static_logic
     await legacy.amain()
 
 
