@@ -66,6 +66,7 @@ def more_menu(is_admin: bool = False, mini_app_url: str | None = None) -> Inline
     if mini_app_url:
         builder.button(text="🍌 Открыть BANANA", url=mini_app_url)
     builder.button(text="💰 Баланс", callback_data="menu:balance")
+    builder.button(text="🖼 Мои референсы", callback_data="menu:references")
     builder.button(text="🛒 Пакеты", callback_data="menu:packages")
     builder.button(text="🤝 Партнерка", callback_data="menu:partners")
     builder.button(text="🆘 Поддержка", callback_data="menu:support")
@@ -75,12 +76,14 @@ def more_menu(is_admin: bool = False, mini_app_url: str | None = None) -> Inline
     rows: list[int] = []
     if mini_app_url:
         rows.append(1)
-    rows.extend([2, 2])
+    rows.extend([2, 2, 1])
     if is_admin:
         rows.append(1)
     rows.append(nav_count)
     builder.adjust(*rows)
     return builder.as_markup()
+
+
 def mini_app_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="BANANA", web_app=WebAppInfo(url=mini_app_url))
