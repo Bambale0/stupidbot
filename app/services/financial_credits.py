@@ -65,6 +65,19 @@ def reverse_credit(user: User, kind: str, amount: int) -> int:
     return debt
 
 
+def grant_affiliate_balance(user: User, amount_kopecks: int) -> int:
+    """Restore affiliate funds without bypassing debt created by reversals."""
+
+    amount = positive_int(amount_kopecks)
+    debt = positive_int(user.affiliate_debt_kopecks)
+    settled = min(debt, amount)
+    user.affiliate_debt_kopecks = debt - settled
+    available = amount - settled
+    if available:
+        user.affiliate_balance_kopecks = positive_int(user.affiliate_balance_kopecks) + available
+    return available
+
+
 async def apply_package_snapshot_to_user(
     session: AsyncSession, *, user: User, snapshot: dict[str, Any]
 ) -> None:
@@ -111,10 +124,7 @@ async def apply_affiliate_commission(
     payment.affiliate_commission_user_id = referrer.id
     payment.affiliate_commission_kopecks = commission
     referrer.affiliate_earned_kopecks = positive_int(referrer.affiliate_earned_kopecks) + commission
-    debt = positive_int(referrer.affiliate_debt_kopecks)
-    settled = min(debt, commission)
-    referrer.affiliate_debt_kopecks = debt - settled
-    referrer.affiliate_balance_kopecks = positive_int(referrer.affiliate_balance_kopecks) + commission - settled
+    grant_affiliate_balance(referrer, commission)
     return commission
 
 
