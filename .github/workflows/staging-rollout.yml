@@ -186,10 +186,10 @@ jobs:
           cat > rollout-status.md <<EOF
           ## Staging rollout: ${automated_gate}
 
-          - SHA: `${GITHUB_SHA}`
-          - Branch: `${GITHUB_REF_NAME}`
-          - GitHub job status: `${JOB_STATUS}`
-          - Backup/migration/restart/health gate: `${automated_gate}`
+          - SHA: \`${GITHUB_SHA}\`
+          - Branch: \`${GITHUB_REF_NAME}\`
+          - GitHub job status: \`${JOB_STATUS}\`
+          - Backup/migration/restart/health gate: \`${automated_gate}\`
           - Run: ${run_url}
 
           Evidence is stored in the workflow artifact. Secret values are not included.
