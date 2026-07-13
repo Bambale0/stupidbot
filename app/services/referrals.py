@@ -146,6 +146,7 @@ async def disabled_increment_feed_share(session: AsyncSession, task_id: int) -> 
 def install_repository_patches() -> None:
     """Install financial/referral implementations before plugins import repository symbols."""
     from app import repositories
+    from app.services.billing_catalog import install_billing_catalog_patches
     from app.services.financial_integrity import (
         apply_affiliate_commission,
         apply_package_snapshot_to_user,
@@ -153,6 +154,8 @@ def install_repository_patches() -> None:
         package_is_user_visible,
         refund_task_credits,
     )
+
+    install_billing_catalog_patches(repositories)
 
     for package in repositories.DEFAULT_PACKAGES:
         if bool(package.get("is_unlimited")):
