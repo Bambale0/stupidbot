@@ -1,259 +1,219 @@
 # StupidBot
 
-Telegram webhook bot на FastAPI + aiogram для BANANA: генерация изображений/видео, Mini App, платежи, партнерка и админ-панель.
+Telegram webhook-приложение BANANA на FastAPI и aiogram: генерация изображений и видео, Mini App, T-Bank платежи, партнерская программа, публичная лента и админ-панель.
 
-## Требования
+## Production stack
 
-- Python 3.10+
+- Python 3.11
 - PostgreSQL
 - Redis
 - HTTPS-домен для Telegram webhook и Mini App
-- systemd/nginx для production-деплоя
-- API-ключи провайдеров генерации: Comet/KIE
-- T-Bank credentials, если включена онлайн-оплата
+- systemd и nginx либо эквивалентный process manager/reverse proxy
+- Comet и/или KIE API credentials
+- T-Bank credentials для онлайн-оплаты
 
 ## Установка
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install -U pip setuptools wheel
-python3 -m pip install -e ".[dev]"
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[dev]"
 cp .env.example .env
+python -m scripts.init_db
 ```
 
-Создать PostgreSQL-базу и поднять Redis. Затем заполнить `.env` и применить миграции/seed defaults.
+`APP_ENV=production` включает обязательную проверку Telegram/callback secrets и HTTPS `PUBLIC_BASE_URL`.
 
-## Переменные окружения
+## Основные переменные окружения
 
-Основные:
+### Приложение
 
-- `TELEGRAM_BOT_TOKEN` — токен Telegram-бота
-- `ADMIN_IDS` — Telegram ID администраторов через запятую
-- `DATABASE_URL` — PostgreSQL URL
-- `REDIS_URL` — Redis URL для FSM/state
-- `PUBLIC_BASE_URL` — публичный HTTPS URL
-- `PORT` — порт FastAPI/uvicorn
-- `LOG_LEVEL` — уровень логов, например `INFO`
+- `APP_ENV`
+- `PUBLIC_BASE_URL`
+- `PORT`
+- `LOG_LEVEL`
+- `DATABASE_URL`
+- `REDIS_URL`
+- `ADMIN_IDS`
 
-Webhook/Mini App:
+### Telegram
 
-- `TELEGRAM_SET_WEBHOOK`
-- `TELEGRAM_WEBHOOK_PATH`
-- `TELEGRAM_WEBHOOK_URL`
+- `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_SECRET_TOKEN`
-- `MINI_APP_PATH`
+- `TELEGRAM_WEBHOOK_PATH`
+- `TELEGRAM_SET_WEBHOOK`
 - `TELEGRAM_BOT_USERNAME`
+- `MINI_APP_PATH`
 
-Генерация:
+### Провайдеры
 
 - `COMET_API_KEY`
 - `COMET_BASE_URL`
+- `COMET_CALLBACK_SECRET`
 - `KIE_API_KEY`
 - `KIE_BASE_URL`
 - `KIE_UPLOAD_BASE_URL`
-- model env-переменные для Banana/Kling/Seedance при необходимости
+- model-specific Comet/KIE variables из `.env.example`
 
-Платежи:
+### Платежи
 
 - `TBANK_TERMINAL_KEY`
 - `TBANK_PASSWORD`
-- `TBANK_CALLBACK_URL`
 - `TBANK_SUCCESS_URL`
 - `TBANK_FAIL_URL`
 
-Не логировать и не коммитить токены, пароли, API-ключи и платежные секреты.
+Произвольная продажа универсальных кредитов и продажа безлимита отключены current policy. Не включайте их обходом UI: серверная финансовая логика и regressions рассчитаны на отключенное состояние.
 
 ## Запуск
 
 Локально:
 
 ```bash
-python3 -m app.main
+source .venv/bin/activate
+python -m app.main
 ```
 
-С автоперезапуском при изменениях:
-
-```bash
-python3 -m app.watchdog
-```
-
-Production через systemd:
+Production:
 
 ```bash
 systemctl restart stupidbot
-systemctl status stupidbot
-journalctl -u stupidbot -f
+systemctl is-active stupidbot
+journalctl -u stupidbot --since "5 minutes ago" --no-pager
 ```
 
-## Миграции
+Пример unit-файла находится в `systemd/stupidbot.service`.
 
-Инициализация/обновление БД и дефолтных записей:
+## Проверки
+
+### Быстрый локальный набор
 
 ```bash
-python3 -m scripts.init_db
+bash scripts/ci.sh
 ```
 
-Команда должна выполняться перед запуском сервиса. В systemd-шаблоне это делается через `ExecStartPre`.
+Он выполняет:
 
-## Тесты
+- compileall;
+- deployment safety contract;
+- Telegram UX contract;
+- gallery compatibility;
+- admin smoke;
+- broad current-policy regression.
 
-Быстрая проверка импортов:
+### PostgreSQL/Redis gate
+
+Workflow `.github/workflows/financial-integrity.yml` запускается для PR и push в `dev`, `main`, `master` и проверяет:
+
+- PostgreSQL 16 и Redis 7 readiness;
+- Alembic migrations;
+- financial ledger/reversal/idempotency regressions;
+- broad current-policy regression;
+- transactional DB smoke;
+- backup/restore drill.
+
+Локальные команды:
 
 ```bash
-python3 -m compileall -q app scripts
+python scripts/runtime_readiness.py
+python scripts/regression_financial.py
+python scripts/regression_500_current.py
+python scripts/staging_issue3_db_smoke.py
 ```
 
-Админка:
+## Миграции и seed
 
 ```bash
-python3 scripts/admin_smoke.py
+python -m scripts.init_db
 ```
 
-Основная регрессия:
+Команда применяет Alembic/compatibility schema и создает обязательные defaults. Она должна выполняться до запуска новой версии сервиса.
 
-```bash
-python3 scripts/regression_500.py
-```
+## Staging rollout
 
-Перед деплоем минимум: compileall + admin_smoke + regression_500.
+Push в `dev` запускает `.github/workflows/staging-rollout.yml`.
 
-## Структура проекта
+Gate выполняет:
+
+1. immutable archive и checksum;
+2. backup кода и PostgreSQL custom-format dump;
+3. isolated restore verification;
+4. candidate compile и contracts до изменения приложения;
+5. миграции и regressions;
+6. PostgreSQL/Redis readiness;
+7. restart и systemd status;
+8. локальный health;
+9. публичные health, Mini App runtime и packages smoke.
+
+Rollback остается активным до завершения public smoke. При ошибке после начала mutation восстанавливается предыдущий код; database dump сохраняется для ручного восстановления данных при необходимости.
+
+Основной скрипт: `ops/staging_rollout.sh`.
+
+## Manual paid smoke
+
+Платные provider и T-Bank workflows запускаются только вручную и требуют явной confirmation phrase:
+
+- `.github/workflows/provider-paid-smoke.yml`
+- `.github/workflows/tbank-live-smoke.yml`
+
+Не запускайте их на production-картах или без согласованного тестового бюджета.
+
+## Архитектура
 
 ```text
 app/
-  main.py                 FastAPI app, webhook, Mini App API, callbacks
-  bot.py                  Bot/Dispatcher, middleware, commands
-  config.py               env settings
-  db.py                   SQLAlchemy engine/session/init
-  models.py               DB models
+  main.py                  FastAPI, Telegram webhook, Mini App API
+  bot.py                   aiogram dispatcher, middleware, commands
+  config.py                environment settings
+  db.py                    SQLAlchemy schema compatibility
+  models.py                domain models and ledgers
   plugins/
-    core/                 старт, меню, баланс, поддержка
-    generation/           image/video FSM и генерации
-    payments/             пакеты и оплата
-    partners/             партнерка и выводы
-    feed/                 публичная лента
-    gallery/              галерея
-    admin/                админ-панель
+    core/                   start, profile, balance, support
+    generation/             image/video flows
+    feed/                   public feed
+    gallery/                legacy-compatible feed alias
+    payments/               packages and payment UX
+    partners/               referrals and withdrawals
+    admin/                  operations and configuration
+    finance/                financial analytics
+    ux/                     production navigation contracts
   services/
-    comet.py              Comet API client
-    kie.py                KIE API client
-    payments.py           платежная логика
-    task_tracker.py       polling/results tracker
+    comet.py
+    kie.py
+    tbank.py
+    task_tracker.py
+    financial_*.py
 scripts/
-  init_db.py              миграции/seed
-  regression_500.py       регрессия
-  admin_smoke.py          smoke админки
-systemd/
-  stupidbot.service       пример unit-файла
+  ci.sh
+  runtime_readiness.py
+  regression_deployment_safety.py
+  regression_bot_ux.py
+  regression_financial.py
+  regression_500_current.py
+ops/
+  staging_rollout.sh
+  verify_postgres_restore.sh
 ```
 
-## CI
+## Security rules
 
-GitHub Actions workflow: `.github/workflows/ci.yml`.
+- не коммитить `.env`, токены, private keys, dumps и реальные customer payloads;
+- не выводить secrets в Actions artifacts или issue comments;
+- callback/webhook signatures проверяются до финансовой mutation;
+- пользователь не получает provider traceback или внутренние идентификаторы;
+- отрицательные цены и балансы запрещены DB constraints;
+- credit и affiliate ledgers append-only;
+- повторные callbacks/finalization/refunds должны быть idempotent.
 
-Что запускается:
+## Release policy
 
-```bash
-python3 -m compileall -q app scripts
-python3 scripts/admin_smoke.py
-python3 scripts/regression_500.py
-```
+`dev` — staging/release-candidate branch. `main` — выпущенная версия.
 
-CI поднимает PostgreSQL 16 и Redis 7 services, задает безопасные test env-переменные и не использует production secrets.
+Перед merge `dev -> main` обязательны:
 
-Локально тот же набор проверок:
-
-```bash
-scripts/ci.sh
-```
-
-## Деплой
-
-1. Обновить код на сервере.
-2. Проверить `.env` и секреты.
-3. Выполнить миграции:
-   ```bash
-   python3 -m scripts.init_db
-   ```
-4. Проверить код:
-   ```bash
-   python3 -m compileall -q app scripts
-   python3 scripts/admin_smoke.py
-   python3 scripts/regression_500.py
-   ```
-5. Перезапустить сервис:
-   ```bash
-   systemctl restart stupidbot
-   systemctl is-active stupidbot
-   ```
-6. Проверить логи:
-   ```bash
-   journalctl -u stupidbot --since "5 min ago" --no-pager
-   ```
-
-На текущем сервере nginx проксирует `https://stupid.chillcreative.ru` на `127.0.0.1:8092`, поэтому в `.env` должен быть `PORT=8092`.
-
-## Обработка ошибок и UX-сценарии
-
-Пользователь не должен видеть traceback, order_id, токены, ключи или технические ответы провайдеров.
-
-Пользовательский fallback:
-
-```text
-Не удалось выполнить операцию. Попробуйте ещё раз через несколько минут.
-```
-
-Что предусмотрено:
-
-- отмена FSM через кнопку `Отмена`, текст `отмена` или `/cancel`;
-- возврат назад/домой через кнопки и текст `назад`/`главное меню`;
-- повторный ввод при неверных данных без сброса шага;
-- неверный тип сообщения в админских FSM — просьба отправить текст;
-- потеря состояния после перезапуска — понятный ответ и возврат в меню;
-- повторное нажатие платежных кнопок — идемпотентная проверка статуса;
-- устаревший callback — логируется и не валит webhook;
-- удаленное/неизмененное сообщение — fallback на новое сообщение, где безопасно;
-- пользователь заблокировал бота — исключение подавляется при уведомлениях;
-- внешние API ошибки/таймауты — пользователю общий текст, детали в логах.
-
-## Админ-панель
-
-Администратор может:
-
-- находить пользователей;
-- блокировать и разблокировать пользователей;
-- менять баланс;
-- просматривать заказы/операции генерации;
-- повторно проверять зависшие операции по provider task id;
-- управлять тарифами и безлимитами;
-- управлять публичной галереей и партнерскими ссылками;
-- просматривать платежи и вручную подтверждать manual pending заявки;
-- обрабатывать обращения через карточку пользователя/баланс/бан/рассылку;
-- отправлять уведомления через рассылку;
-- смотреть последние ошибки из journal;
-- смотреть базовую аналитику.
-
-Повторный запуск операции в админке реализован безопасно как повторная проверка статуса существующей provider-операции. Он не создает новый платный запрос и не списывает кредиты повторно.
-
-## Логирование
-
-Логируется:
-
-- запуск и остановка приложения;
-- Telegram ID пользователя;
-- выбранное действие/callback/команда;
-- начало внешнего платежного запроса;
-- время выполнения операций;
-- результат операции;
-- исключения с traceback;
-- платежные события;
-- административные действия через callbacks/messages.
-
-Не логировать:
-
-- токены;
-- пароли;
-- API-ключи;
-- платежные секреты;
-- персональные данные без необходимости.
+- отсутствие открытых P0/P1/P2 blockers;
+- зеленые CI и Financial integrity;
+- успешный staging rollout текущего SHA;
+- backup/restore evidence;
+- актуальный rollback plan;
+- синхронизация `main` и `dev` после release.
