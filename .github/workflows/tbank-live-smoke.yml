@@ -24,11 +24,6 @@ on:
         required: true
         default: "1000"
         type: string
-      simulate_spent:
-        description: Before refund, spend the credit and commission to verify debt
-        required: true
-        default: true
-        type: boolean
       timeout_seconds:
         description: Maximum refund state polling time
         required: true
@@ -60,7 +55,6 @@ jobs:
       SMOKE_CONFIRMATION: ${{ inputs.confirmation }}
       SMOKE_ORDER_ID: ${{ inputs.order_id }}
       SMOKE_AMOUNT_KOPECKS: ${{ inputs.amount_kopecks }}
-      SMOKE_SIMULATE_SPENT: ${{ inputs.simulate_spent }}
       SMOKE_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
     steps:
       - name: Validate explicit approval and access
@@ -134,7 +128,6 @@ jobs:
             "${SMOKE_CONFIRMATION}" \
             "${SMOKE_ORDER_ID}" \
             "${SMOKE_AMOUNT_KOPECKS}" \
-            "${SMOKE_SIMULATE_SPENT}" \
             "${SMOKE_TIMEOUT_SECONDS}" <<'REMOTE' 2>&1 | tee tbank-live-smoke.log
           set -Eeuo pipefail
           app_dir=$1
@@ -142,11 +135,9 @@ jobs:
           confirmation=$3
           order_id=$4
           amount_kopecks=$5
-          simulate_spent=$6
-          timeout_seconds=$7
+          timeout_seconds=$6
           cd "${app_dir}"
           set -a
-          # shellcheck disable=SC1091
           source .env
           set +a
           args=(
@@ -157,9 +148,6 @@ jobs:
           )
           if [[ -n "${order_id}" ]]; then
             args+=(--order-id "${order_id}")
-          fi
-          if [[ "${simulate_spent}" == "true" ]]; then
-            args+=(--simulate-spent)
           fi
           python3 scripts/tbank_live_smoke.py "${args[@]}"
           REMOTE
@@ -183,14 +171,9 @@ jobs:
           set -Eeuo pipefail
           result=failed
           marker="TBANK_SMOKE_${SMOKE_ACTION^^}="
-          if [[ "${SMOKE_ACTION}" == "create" ]]; then
-            marker="TBANK_SMOKE_CREATE="
-          elif [[ "${SMOKE_ACTION}" == "status" ]]; then
-            marker="TBANK_SMOKE_STATUS="
-          elif [[ "${SMOKE_ACTION}" == "refund" ]]; then
-            marker="TBANK_SMOKE_REFUND="
-          fi
-          if [[ -f tbank-live-smoke.log ]] && grep -q "${marker}" tbank-live-smoke.log; then
+          if [[ "${JOB_STATUS}" == "success" ]] \
+            && [[ -f tbank-live-smoke.log ]] \
+            && grep -q "${marker}" tbank-live-smoke.log; then
             result=passed
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
