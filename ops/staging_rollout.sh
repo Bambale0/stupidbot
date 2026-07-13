@@ -64,6 +64,8 @@ trap on_exit EXIT
 [[ -s "${checksum}" ]] || { echo "Missing candidate checksum" >&2; exit 1; }
 command -v pg_dump >/dev/null
 command -v pg_restore >/dev/null
+command -v createdb >/dev/null
+command -v dropdb >/dev/null
 command -v rsync >/dev/null
 command -v curl >/dev/null
 
@@ -77,7 +79,28 @@ set -a
 # shellcheck disable=SC1090
 source "${app_dir}/.env"
 set +a
-: "${DATABASE_URL:?DATABASE_URL is required in server .env}"
+
+required_runtime_env=(
+  TELEGRAM_BOT_TOKEN
+  TELEGRAM_SECRET_TOKEN
+  COMET_CALLBACK_SECRET
+  DATABASE_URL
+  REDIS_URL
+  TBANK_TERMINAL_KEY
+  TBANK_PASSWORD
+  COMET_API_KEY
+  KIE_API_KEY
+)
+missing_runtime_env=()
+for name in "${required_runtime_env[@]}"; do
+  if [[ -z "${!name:-}" ]]; then
+    missing_runtime_env+=("${name}")
+  fi
+done
+if (( ${#missing_runtime_env[@]} > 0 )); then
+  printf 'Missing required staging runtime variables: %s\n' "${missing_runtime_env[*]}" >&2
+  exit 1
+fi
 
 db_url=$(python3 - <<'PY'
 import os
@@ -116,6 +139,9 @@ rm -rf "${candidate}"
 mkdir -p "${candidate}"
 tar -xzf "${archive}" -C "${candidate}"
 python3 -m compileall -q "${candidate}/app" "${candidate}/scripts"
+chmod 700 "${candidate}/ops/verify_postgres_restore.sh"
+"${candidate}/ops/verify_postgres_restore.sh" \
+  "${DATABASE_URL}" "${db_url}" "${db_backup}" "${candidate}"
 
 mutation_started=1
 rsync --archive --delete \
@@ -130,6 +156,8 @@ cd "${app_dir}"
 python3 -m compileall -q app scripts
 python3 -m scripts.init_db
 python3 scripts/admin_smoke.py
+python3 scripts/regression_500.py
+python3 scripts/staging_issue3_db_smoke.py
 restart_service
 
 health_url=${STUPIDBOT_LOCAL_HEALTH_URL:-http://127.0.0.1:8092/health}
@@ -147,11 +175,15 @@ if (( rollout_succeeded == 0 )); then
   exit 1
 fi
 
+python3 scripts/staging_issue3_public_smoke.py
 run_root systemctl status "${service_name}" --no-pager --lines=20
 journalctl -u "${service_name}" --since "5 minutes ago" --no-pager --lines=100 \
   | sed -E 's/(token|password|secret|api[_-]?key)=([^[:space:]]+)/\1=[REDACTED]/Ig' || true
 
 echo "Backup directory: ${backup_dir}"
+echo "Database restore verification: passed"
+echo "Transactional financial smoke: passed"
+echo "Public Mini App smoke: passed"
 echo "Deployed SHA: ${release_sha}"
 echo "Automated staging rollout passed"
 trap - EXIT
