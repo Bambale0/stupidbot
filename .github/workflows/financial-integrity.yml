@@ -14,7 +14,7 @@ concurrency:
 jobs:
   postgres-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
@@ -56,6 +56,20 @@ jobs:
           status=$?
           cat financial-regression.log
           exit $status
+      - name: Transactional staging database smoke
+        run: python scripts/staging_issue3_db_smoke.py
+      - name: Verify PostgreSQL backup restore
+        run: |
+          set -Eeuo pipefail
+          pg_dump --format=custom --no-owner --no-privileges \
+            --file=/tmp/stupidbot-ci.dump \
+            postgresql://postgres@127.0.0.1:5432/stupidbot_ci
+          chmod 700 ops/verify_postgres_restore.sh
+          ops/verify_postgres_restore.sh \
+            "${DATABASE_URL}" \
+            postgresql://postgres@127.0.0.1:5432/stupidbot_ci \
+            /tmp/stupidbot-ci.dump \
+            "${GITHUB_WORKSPACE}"
       - name: Upload financial regression log
         if: always()
         uses: actions/upload-artifact@v4
