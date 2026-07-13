@@ -49,6 +49,51 @@ class _FakeBot:
         self.calls.append((list(commands), scope))
 
 
+class _FakeStatusState:
+    def __init__(self, data: dict[str, object]) -> None:
+        self.data = dict(data)
+
+    async def get_data(self) -> dict[str, object]:
+        return dict(self.data)
+
+    async def update_data(self, **updates: object) -> None:
+        self.data.update(updates)
+
+
+class _FakeStatusBot:
+    def __init__(self, events: list[tuple[str, object]]) -> None:
+        self.events = events
+
+    async def edit_message_reply_markup(
+        self,
+        *,
+        chat_id: int,
+        message_id: int,
+        reply_markup,
+    ) -> None:
+        self.events.append(
+            (
+                "disable-old-settings",
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "reply_markup": reply_markup,
+                },
+            )
+        )
+
+
+class _FakePromptMessage:
+    def __init__(self, events: list[tuple[str, object]], bot: _FakeStatusBot) -> None:
+        self.events = events
+        self.bot = bot
+        self.chat = SimpleNamespace(id=700)
+
+    async def answer(self, text: str):
+        self.events.append(("status-after-prompt", text))
+        return SimpleNamespace(message_id=99)
+
+
 def _check_public_navigation() -> None:
     main = main_menu(is_admin=False, mini_app_url="https://example.test/miniapp/")
     _assert_unique_buttons(main, screen="main")
@@ -180,12 +225,40 @@ def _check_source_contracts() -> None:
     assert 'F.data.startswith("pay:package:")' in payments_source
 
     ux_plugin._install_generation_navigation()
+    ux_plugin._install_generation_status_after_prompt()
     ux_plugin._install_feed_refresh()
     from app.plugins.feed import plugin as feed_plugin
     from app.plugins.generation import plugin as generation_plugin
 
     assert getattr(generation_plugin._send_image_request_screen, "_ux_model_choice_installed", False)
+    assert getattr(
+        generation_plugin._submit_image_task_from_message,
+        "_ux_status_after_prompt_installed",
+        False,
+    )
     assert getattr(feed_plugin._refresh_feed_card, "_ux_edit_caption_installed", False)
+
+
+async def _check_generation_status_after_prompt() -> None:
+    events: list[tuple[str, object]] = []
+    bot = _FakeStatusBot(events)
+    message = _FakePromptMessage(events, bot)
+    state = _FakeStatusState({"status_message_id": 42})
+
+    status_message_id = await ux_plugin._start_image_status_after_prompt(
+        message,  # type: ignore[arg-type]
+        state,  # type: ignore[arg-type]
+        bot,  # type: ignore[arg-type]
+    )
+
+    assert status_message_id == 99
+    assert state.data["status_message_id"] == 99
+    assert events[0][0] == "status-after-prompt", events
+    assert "Готовлю референсы" in str(events[0][1])
+    assert events[1] == (
+        "disable-old-settings",
+        {"chat_id": 700, "message_id": 42, "reply_markup": None},
+    )
 
 
 async def _check_commands() -> None:
@@ -216,6 +289,7 @@ async def amain() -> None:
     _check_packages()
     _check_admin_information_architecture()
     _check_source_contracts()
+    await _check_generation_status_after_prompt()
     await _check_commands()
     print("Bot UX regression passed")
 
