@@ -92,10 +92,14 @@ class Settings(BaseSettings):
         if value in (None, ""):
             return []
         if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        raise TypeError("ENABLED_PLUGINS must be a comma-separated string or a list")
+            plugins = [str(item).strip() for item in value if str(item).strip()]
+        elif isinstance(value, str):
+            plugins = [item.strip() for item in value.split(",") if item.strip()]
+        else:
+            raise TypeError("ENABLED_PLUGINS must be a comma-separated string or a list")
+        if "generation" in plugins and "references" not in plugins:
+            plugins.insert(plugins.index("generation") + 1, "references")
+        return plugins
 
     @property
     def telegram_webhook_url(self) -> str:
