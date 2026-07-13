@@ -14,27 +14,72 @@ from app.ui import add_navigation_buttons
 
 router = Router(name="ux")
 
+ADMIN_HOME_BUTTONS: tuple[tuple[str, str], ...] = (
+    ("Обзор", "admin:ux:overview"),
+    ("Пользователи", "admin:users"),
+    ("Генерации", "admin:orders"),
+    ("Платежи", "admin:payments"),
+    ("Каталог", "admin:ux:catalog"),
+    ("Партнёрка", "admin:ux:affiliate"),
+    ("Коммуникации", "admin:ux:communications"),
+    ("Система", "admin:ux:system"),
+)
+
+ADMIN_SECTIONS: dict[str, tuple[str, str, tuple[tuple[str, str], ...]]] = {
+    "admin:ux:overview": (
+        "Обзор",
+        "Ключевые показатели проекта и финансовая целостность.",
+        (
+            ("Статистика", "admin:stats"),
+            ("Аналитика", "admin:analytics"),
+            ("Финансы", "admin:finance"),
+        ),
+    ),
+    "admin:ux:catalog": (
+        "Каталог",
+        "Модели, цены, пакеты и публичные работы.",
+        (
+            ("Модели и цены", "admin:models"),
+            ("Пакеты", "admin:packages"),
+            ("Публичные работы", "admin:gallery"),
+        ),
+    ),
+    "admin:ux:affiliate": (
+        "Партнёрка",
+        "Рефералы, выплаты и полезные партнёрские ссылки.",
+        (
+            ("Рефералы", "admin:referrals"),
+            ("Заявки на вывод", "admin:withdrawals"),
+            ("Партнёрские ссылки", "admin:partners"),
+        ),
+    ),
+    "admin:ux:communications": (
+        "Коммуникации",
+        "Приветствие, обращения пользователей и рассылки.",
+        (
+            ("Тексты и настройки", "admin:settings"),
+            ("Обращения", "admin:support"),
+            ("Рассылка", "admin:broadcast"),
+        ),
+    ),
+    "admin:ux:system": (
+        "Система",
+        "Диагностика работы сервиса.",
+        (("Логи ошибок", "admin:logs"),),
+    ),
+}
+
 
 def _admin_home_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    buttons = [
-        ("Обзор", "admin:ux:overview"),
-        ("Пользователи", "admin:users"),
-        ("Генерации", "admin:orders"),
-        ("Платежи", "admin:payments"),
-        ("Каталог", "admin:ux:catalog"),
-        ("Партнёрка", "admin:ux:affiliate"),
-        ("Коммуникации", "admin:ux:communications"),
-        ("Система", "admin:ux:system"),
-    ]
-    for text, callback_data in buttons:
+    for text, callback_data in ADMIN_HOME_BUTTONS:
         builder.button(text=text, callback_data=callback_data)
     builder.button(text="Главная", callback_data="menu:main")
     builder.adjust(2, 2, 2, 2, 1)
     return builder.as_markup()
 
 
-def _section_keyboard(items: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+def _section_keyboard(items: tuple[tuple[str, str], ...]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for text, callback_data in items:
         builder.button(text=text, callback_data=callback_data)
@@ -51,18 +96,12 @@ async def _require_admin(callback: CallbackQuery, context: AppContext) -> bool:
     return True
 
 
-async def _render_section(
-    callback: CallbackQuery,
-    context: AppContext,
-    state: FSMContext,
-    *,
-    title: str,
-    description: str,
-    items: list[tuple[str, str]],
-) -> None:
+@router.callback_query(F.data.in_(set(ADMIN_SECTIONS)))
+async def admin_section(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     if not await _require_admin(callback, context):
         return
+    title, description, items = ADMIN_SECTIONS[str(callback.data)]
     if callback.message:
         from app.plugins.admin import plugin as admin_plugin
 
@@ -72,89 +111,6 @@ async def _render_section(
             reply_markup=_section_keyboard(items),
         )
     await callback.answer()
-
-
-@router.callback_query(F.data == "admin:ux:overview")
-async def admin_overview(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
-    await _render_section(
-        callback,
-        context,
-        state,
-        title="Обзор",
-        description="Ключевые показатели проекта и финансовая целостность.",
-        items=[
-            ("Статистика", "admin:stats"),
-            ("Аналитика", "admin:analytics"),
-            ("Финансы", "admin:finance"),
-        ],
-    )
-
-
-@router.callback_query(F.data == "admin:ux:catalog")
-async def admin_catalog(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
-    await _render_section(
-        callback,
-        context,
-        state,
-        title="Каталог",
-        description="Модели, цены, пакеты и публичные работы.",
-        items=[
-            ("Модели и цены", "admin:models"),
-            ("Пакеты", "admin:packages"),
-            ("Публичные работы", "admin:gallery"),
-        ],
-    )
-
-
-@router.callback_query(F.data == "admin:ux:affiliate")
-async def admin_affiliate(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
-    await _render_section(
-        callback,
-        context,
-        state,
-        title="Партнёрка",
-        description="Рефералы, выплаты и полезные партнёрские ссылки.",
-        items=[
-            ("Рефералы", "admin:referrals"),
-            ("Заявки на вывод", "admin:withdrawals"),
-            ("Партнёрские ссылки", "admin:partners"),
-        ],
-    )
-
-
-@router.callback_query(F.data == "admin:ux:communications")
-async def admin_communications(
-    callback: CallbackQuery,
-    context: AppContext,
-    state: FSMContext,
-) -> None:
-    await _render_section(
-        callback,
-        context,
-        state,
-        title="Коммуникации",
-        description="Приветствие, обращения пользователей и рассылки.",
-        items=[
-            ("Тексты и настройки", "admin:settings"),
-            ("Обращения", "admin:support"),
-            ("Рассылка", "admin:broadcast"),
-        ],
-    )
-
-
-@router.callback_query(F.data == "admin:ux:system")
-async def admin_system(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
-    await _render_section(
-        callback,
-        context,
-        state,
-        title="Система",
-        description="Диагностика и безопасная повторная проверка операций.",
-        items=[
-            ("Логи ошибок", "admin:logs"),
-            ("Операции", "admin:orders"),
-        ],
-    )
 
 
 def _install_admin_navigation() -> None:
