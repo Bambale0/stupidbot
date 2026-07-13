@@ -3,7 +3,7 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
-from aiogram import Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -20,6 +20,7 @@ from app.plugins.generation.plugin import (
     _image_settings_keyboard,
     _image_settings_text,
     _repeat_image_state_payload,
+    _submit_image_task,
     _task_is_image_generation,
 )
 from app.repositories import get_model
@@ -90,6 +91,16 @@ async def repeat_image_generation(
             "Можно изменить промпт или сразу нажать «Запустить»."
         ),
     )
+
+
+@router.callback_query(ImageFlow.settings, F.data == "image:submit")
+async def submit_image_from_settings(
+    callback: CallbackQuery,
+    context: AppContext,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    await _submit_image_task(callback, context, state, bot)
 
 
 async def _send_reference_library(message: Message, context: AppContext, user_id: int) -> None:
