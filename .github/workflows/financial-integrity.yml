@@ -28,9 +28,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       APP_ENV: ci
       DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/stupidbot_ci
+      REDIS_URL: redis://127.0.0.1:6379/0
       PHOTO_CREDIT_VALUE_KOPECKS: "3900"
       VIDEO_CREDIT_VALUE_KOPECKS: "10000"
       CUSTOM_CREDIT_SALES_ENABLED: "false"
@@ -56,6 +66,8 @@ jobs:
         run: python scripts/regression_gallery_compat.py
       - name: Apply Alembic migrations
         run: python -m scripts.migrate_db
+      - name: Runtime readiness
+        run: python scripts/runtime_readiness.py
       - name: Financial regression
         run: |
           set -Eeuo pipefail
