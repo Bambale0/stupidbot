@@ -1,6 +1,6 @@
 # StupidBot
 
-Telegram webhook-приложение BANANA на FastAPI и aiogram: генерация изображений и видео, Mini App, T-Bank платежи, партнерская программа, публичная лента и админ-панель.
+Telegram webhook-приложение BANANA на FastAPI и aiogram: генерация изображений и видео, повтор с сохранёнными референсами, Mini App, T-Bank платежи, партнерская программа, публичная лента и админ-панель.
 
 ## Production stack
 
@@ -84,6 +84,14 @@ journalctl -u stupidbot --since "5 minutes ago" --no-pager
 
 Пример unit-файла находится в `systemd/stupidbot.service`.
 
+## Пользовательские сценарии
+
+- «Создать фото» открывает выбор активной модели и текущей цены.
+- «Мои референсы» на экране фото-моделей показывает последние уникальные наборы Telegram `file_id`.
+- Повтор собственной генерации восстанавливает фото, модель, промпт, формат и качество.
+- Перед повторным запуском заново проверяются доступность модели, лимит фото, актуальная цена и баланс.
+- Повтор публичной работы не копирует чужой результат и требует собственный референс.
+
 ## Проверки
 
 ### Быстрый локальный набор
@@ -97,6 +105,7 @@ bash scripts/ci.sh
 - compileall;
 - deployment safety contract;
 - Telegram UX contract;
+- reusable reference regression;
 - gallery compatibility;
 - admin smoke;
 - broad current-policy regression.
@@ -107,6 +116,7 @@ Workflow `.github/workflows/financial-integrity.yml` запускается дл
 
 - PostgreSQL 16 и Redis 7 readiness;
 - Alembic migrations;
+- reusable reference flow;
 - financial ledger/reversal/idempotency regressions;
 - broad current-policy regression;
 - transactional DB smoke;
@@ -116,6 +126,7 @@ Workflow `.github/workflows/financial-integrity.yml` запускается дл
 
 ```bash
 python scripts/runtime_readiness.py
+python scripts/reference_regression.py
 python scripts/regression_financial.py
 python scripts/regression_500_current.py
 python scripts/staging_issue3_db_smoke.py
@@ -170,6 +181,7 @@ app/
   plugins/
     core/                   start, profile, balance, support
     generation/             image/video flows
+    references/             personal repeat and saved Telegram file_id sets
     feed/                   public feed
     gallery/                legacy-compatible feed alias
     payments/               packages and payment UX
@@ -186,6 +198,7 @@ app/
 scripts/
   ci.sh
   runtime_readiness.py
+  reference_regression.py
   regression_deployment_safety.py
   regression_bot_ux.py
   regression_financial.py
@@ -203,7 +216,8 @@ ops/
 - пользователь не получает provider traceback или внутренние идентификаторы;
 - отрицательные цены и балансы запрещены DB constraints;
 - credit и affiliate ledgers append-only;
-- повторные callbacks/finalization/refunds должны быть idempotent.
+- повторные callbacks/finalization/refunds должны быть idempotent;
+- сохранённые референсы доступны только владельцу исходной задачи.
 
 ## Release policy
 
