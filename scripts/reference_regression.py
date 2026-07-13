@@ -5,6 +5,7 @@ if __package__ in {None, ""}:
 
     add_project_root_to_path()
 
+from app.config import Settings
 from app.models import GenerationTask
 from app.plugins.generation.plugin import _repeat_image_state_payload
 from app.plugins.references.plugin import (
@@ -76,6 +77,9 @@ def main() -> None:
     assert _callback_task_id("image:again:101", "image:again:") == 101
     assert _callback_task_id("image:again:not-a-number", "image:again:") is None
     assert _callback_task_id("refs:use:0", "refs:use:") is None
+
+    settings = Settings(enabled_plugins="core,generation,admin")
+    assert settings.enabled_plugins == ["core", "generation", "references", "admin"]
 
     print("reference reuse regression passed")
 
