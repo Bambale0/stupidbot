@@ -47,6 +47,8 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Compile
         run: python -m compileall -q app scripts
+      - name: Bot UX regression
+        run: python scripts/regression_bot_ux.py
       - name: Apply Alembic migrations
         run: python -m scripts.migrate_db
       - name: Financial regression
