@@ -194,6 +194,6 @@ jobs:
 
           Evidence is stored in the workflow artifact. Secret values are not included.
           EOF
-          gh issue comment 3 \
+          gh issue comment 17 \
             --repo "${GITHUB_REPOSITORY}" \
             --body-file rollout-status.md
