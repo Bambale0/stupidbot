@@ -255,8 +255,21 @@ async def _check_database_workflows() -> None:
                     )
                 )
                 assert banana_models, "banana models must exist"
-                for banana in banana_models:
+                by_code = {banana.code: banana for banana in banana_models}
+                lite = by_code["nano-banana"]
+                assert lite.title == "Nano Banana 2 Lite"
+                assert lite.config.get("provider") == "kie", lite.config
+                assert lite.config.get("provider_model") == "nano-banana-2-lite", lite.config
+                assert lite.config.get("resolutions") == ["1K"], lite.config
+                assert lite.config.get("output_formats") == [], lite.config
+                assert lite.config.get("max_images") == 10, lite.config
+                for code, expected_max_images in (
+                    ("nano-banana-pro", 8),
+                    ("nano-banana-2", 14),
+                ):
+                    banana = by_code[code]
                     assert banana.config.get("resolutions") == ["2K", "4K"], banana.config
+                    assert banana.config.get("max_images") == expected_max_images, banana.config
         finally:
             await transaction.rollback()
     await engine.dispose()
