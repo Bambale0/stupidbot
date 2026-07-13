@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import scripts.sqlite_jsonb_compat  # noqa: F401,E402
 import app.bot  # noqa: F401,E402
 
 from sqlalchemy import select
