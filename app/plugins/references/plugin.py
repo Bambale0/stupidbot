@@ -6,7 +6,7 @@ from typing import Any
 from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 
@@ -200,6 +200,7 @@ async def _reference_state_payload(
                 "reused_from_task_id": task.id,
             }
         )
+        preserve_reference_origin(payload, task)
         return payload, None
 
 
@@ -234,12 +235,18 @@ def reference_signature(task: GenerationTask) -> tuple[str, ...]:
     )
 
 
+def preserve_reference_origin(payload: dict[str, Any], task: GenerationTask) -> dict[str, Any]:
+    source_task_id = int(task.source_feed_task_id or 0)
+    if source_task_id > 0:
+        payload["source_feed_task_id"] = source_task_id
+    return payload
+
+
 def _reference_button_text(task: GenerationTask) -> str:
     count = len(reference_signature(task))
     prompt = " ".join(str(task.prompt or "").split())
     prompt = f" · {prompt[:32]}" if prompt else ""
-    photo_word = "фото" if count == 1 else "фото"
-    return f"#{task.id} · {count} {photo_word}{prompt}"
+    return f"#{task.id} · {count} фото{prompt}"
 
 
 def _callback_task_id(value: str | None, prefix: str) -> int | None:
