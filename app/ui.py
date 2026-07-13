@@ -16,7 +16,7 @@ def banana_amount(value: int | float | str) -> str:
 
 
 def model_price_text(model: GenerationModel, *, short: bool = False) -> str:
-    price = int(model.price_credits or 0)
+    price = max(0, int(model.price_credits or 0))
     if model.category == "image":
         unit = "фото-кр." if short else "фото-кредитов"
     elif model.category == "video":
@@ -81,6 +81,8 @@ def more_menu(is_admin: bool = False, mini_app_url: str | None = None) -> Inline
     rows.append(nav_count)
     builder.adjust(*rows)
     return builder.as_markup()
+
+
 def mini_app_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="BANANA", web_app=WebAppInfo(url=mini_app_url))
@@ -146,17 +148,19 @@ def options_keyboard(prefix: str, values: list[str], back: str | None = None) ->
 
 
 def packages_keyboard(packages: list[CreditPackage]) -> InlineKeyboardMarkup:
+    visible_packages = [package for package in packages if not package.is_unlimited]
     builder = InlineKeyboardBuilder()
-    for package in packages:
+    for package in visible_packages:
         price = f"{float(package.price_rub):.0f} ₽"
         amount = package_credits_text(package, short=True)
         builder.button(
             text=f"{package.title} · {amount} · {price}",
             callback_data=f"pay:package:{package.id}",
         )
-    builder.button(text="Свое количество", callback_data="pay:custom")
     nav_count = add_navigation_buttons(builder, back_callback=MAIN_MENU_CALLBACK)
-    builder.adjust(*([1] * len(packages)), 1, nav_count)
+    rows = [1] * len(visible_packages)
+    rows.append(nav_count)
+    builder.adjust(*rows)
     return builder.as_markup()
 
 

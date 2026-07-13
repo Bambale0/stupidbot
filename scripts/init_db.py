@@ -9,8 +9,12 @@ if __package__ in {None, ""}:
 
 from app.config import get_settings
 from app.db import build_engine, build_session_factory, session_scope
-from app.repositories import ensure_defaults
-from scripts.migrate_db import run_migrations
+from app.services.referrals import install_repository_patches
+
+install_repository_patches()
+
+from app.repositories import ensure_defaults  # noqa: E402
+from scripts.migrate_db import run_migrations  # noqa: E402
 
 
 async def seed_defaults() -> None:
