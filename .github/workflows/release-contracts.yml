@@ -1,0 +1,50 @@
+name: Release contracts
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: release-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: ci
+      DATABASE_URL: sqlite+aiosqlite:///./stupidbot_release_ci.sqlite3
+      AUTO_CREATE_DB: "true"
+      ADMIN_IDS: "1001"
+      ENABLED_PLUGINS: core,generation,gallery,feed,partners,payments,admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          set -Eeuo pipefail
+          python -m pip install -U pip setuptools wheel
+          python -m pip install -e ".[dev]"
+      - name: Compile
+        run: python -m compileall -q app scripts
+      - name: Deployment safety
+        run: python scripts/regression_deployment_safety.py
+      - name: Telegram UX
+        run: python scripts/regression_bot_ux.py
+      - name: Reusable references
+        run: python scripts/reference_regression.py
+      - name: Disabled backend contracts
+        run: python scripts/regression_backend_contracts.py
+      - name: Gallery compatibility
+        run: python scripts/regression_gallery_compat.py
+      - name: Admin SQLite smoke
+        run: python scripts/admin_smoke.py
+      - name: Broad current-policy SQLite regression
+        run: python scripts/regression_500_current.py
