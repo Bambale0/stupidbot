@@ -14,7 +14,7 @@ concurrency:
 jobs:
   postgres-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -56,6 +56,8 @@ jobs:
           status=$?
           cat financial-regression.log
           exit $status
+      - name: Full current-policy regression
+        run: python scripts/regression_500_current.py
       - name: Transactional staging database smoke
         run: python scripts/staging_issue3_db_smoke.py
       - name: Verify PostgreSQL backup restore
