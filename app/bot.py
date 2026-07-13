@@ -71,9 +71,14 @@ def create_bot(settings: Settings) -> Bot:
 
 
 def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
-    for required_plugin in ("feed", "finance", "ux"):
+    for required_plugin in ("feed", "finance"):
         if required_plugin not in context.settings.enabled_plugins:
             context.settings.enabled_plugins.append(required_plugin)
+    # UX patches depend on all feature modules being loaded first.
+    context.settings.enabled_plugins = [
+        name for name in context.settings.enabled_plugins if name != "ux"
+    ]
+    context.settings.enabled_plugins.append("ux")
     dispatcher = Dispatcher(storage=RedisStorage(redis=redis))
     dispatcher.message.middleware(ActionLoggingMiddleware())
     dispatcher.callback_query.middleware(ActionLoggingMiddleware())
