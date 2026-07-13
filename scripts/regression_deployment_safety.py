@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+if __package__ in {None, ""}:
+    from _bootstrap import add_project_root_to_path
+
+    add_project_root_to_path()
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
