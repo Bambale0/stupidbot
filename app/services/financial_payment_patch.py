@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -31,6 +32,12 @@ def install_payment_patches() -> None:
             return await original_handler(context, payload)
         return await _handle_full_reversal(context, payments, payload, status)
 
+    # Main imports these values after app.bot installs repository/payment patches.
+    # Zero values keep the legacy response shape harmless for old Mini App clients,
+    # while all custom-credit creation paths remain rejected server-side.
+    payments.CUSTOM_CREDIT_PRICE_RUB = Decimal("0")
+    payments.CUSTOM_CREDIT_MIN_AMOUNT = 0
+    payments.CUSTOM_CREDIT_MAX_AMOUNT = 0
     payments.create_custom_credit_payment = disabled_custom_credit_payment
     payments.handle_tbank_notification = reversal_aware_handler
     payments._financial_patches_installed = True
