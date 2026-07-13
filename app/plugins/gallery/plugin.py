@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -7,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.context import AppContext
+from app.models import GalleryItem
 from app.plugins.common import ensure_user_for_callback, ensure_user_for_message
 from app.ui import add_navigation_buttons
 
@@ -16,8 +19,6 @@ router = Router(name="gallery")
 @router.message(F.text == "Галерея")
 @router.message(Command("gallery"))
 async def gallery(message: Message, context: AppContext, state: FSMContext) -> None:
-    """Backward-compatible route after merging gallery into the interactive feed."""
-
     await state.clear()
     await ensure_user_for_message(message, context)
     await message.answer(
@@ -36,6 +37,14 @@ async def gallery_callback(callback: CallbackQuery, context: AppContext, state: 
             reply_markup=_open_feed_keyboard(),
         )
     await callback.answer()
+
+
+def _gallery_caption(item: GalleryItem) -> str:
+    title = escape(str(item.title or "Работа BANANA"))
+    prompt = escape(str(item.prompt or ""))
+    if prompt:
+        return f"<b>{title}</b>\n\nПромпт:\n{prompt}"
+    return f"<b>{title}</b>"
 
 
 def _open_feed_keyboard():
