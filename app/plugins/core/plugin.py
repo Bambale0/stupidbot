@@ -4,39 +4,27 @@ from contextlib import suppress
 from html import escape
 
 from aiogram import Dispatcher, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.context import AppContext
 from app.db import session_scope
 from app.models import BotSetting, User
 from app.plugins.common import ensure_user_for_callback, ensure_user_for_message, is_admin_user
-from app.repositories import (
-    bind_referral,
-    ensure_partner_code,
-    list_enabled_models,
-    model_credit_type,
-    user_credit_balance,
-    user_generates_for_free,
-    user_has_unlimited,
-)
-from app.services.referrals import build_ref_link
-from app.ui import main_menu, mini_app_keyboard, more_menu, navigation_keyboard
+from app.repositories import bind_referral, ensure_partner_code, user_has_unlimited
+from app.ui import account_menu, balance_keyboard, main_menu, mini_app_keyboard, navigation_keyboard
 
 router = Router(name="core")
-EMPTY_HOME_TEXTS = {
-    "В публичной галерее пока пусто.",
-    "В публичной ленте пока пусто.",
-}
 
 
-def _main_menu_markup(user: User, context: AppContext):
+def _main_menu_markup(user: User, context: AppContext) -> InlineKeyboardMarkup:
     return main_menu(is_admin_user(user, context), mini_app_url=context.settings.mini_app_url)
 
 
-def _more_menu_markup(user: User, context: AppContext):
-    return more_menu(is_admin_user(user, context), mini_app_url=context.settings.mini_app_url)
+def _account_menu_markup(user: User, context: AppContext) -> InlineKeyboardMarkup:
+    return account_menu(is_admin_user(user, context))
 
 
 async def _welcome_text(context: AppContext) -> str:
@@ -44,7 +32,26 @@ async def _welcome_text(context: AppContext) -> str:
         setting = await session.get(BotSetting, "welcome_text")
         if setting and setting.value.get("text"):
             return escape(str(setting.value["text"]))
-    return "Привет. Выберите раздел в меню."
+    return "Что создаём?"
+
+
+async def _edit_or_answer(
+    callback: CallbackQuery,
+    text: str,
+    *,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    if not callback.message:
+        return
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        error = str(exc).lower()
+        if "message is not modified" in error:
+            return
+        if "there is no text in the message to edit" not in error:
+            raise
+        await callback.message.answer(text, reply_markup=reply_markup)
 
 
 @router.message(CommandStart())
@@ -63,17 +70,17 @@ async def start(
             if fresh_user:
                 referrer = await bind_referral(session, user=fresh_user, ref_code=command.args)
                 if referrer:
-                    referrer_name = referrer.first_name or referrer.username or "партнера"
+                    referrer_name = referrer.first_name or referrer.username or "партнёра"
     await message.answer(
         await _welcome_text(context),
         reply_markup=_main_menu_markup(user, context),
     )
     if referrer_name:
-        await message.answer(f"Вы пришли по приглашению от {escape(referrer_name)}.")
+        await message.answer(f"Приглашение от {escape(referrer_name)} принято.")
 
 
 @router.message(Command("menu"))
-@router.message(F.text.in_({"Меню", "Главное меню", "Домой", "Назад / Домой"}))
+@router.message(F.text.in_({"Меню", "Главное меню", "Главная", "Домой", "Назад / Домой"}))
 async def menu(message: Message, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     user = await ensure_user_for_message(message, context)
@@ -85,7 +92,8 @@ async def mini_app(message: Message, context: AppContext, state: FSMContext) -> 
     await state.clear()
     await ensure_user_for_message(message, context)
     await message.answer(
-        "Апка BANANA", reply_markup=mini_app_keyboard(context.settings.mini_app_url)
+        "Студия BANANA — быстрый визуальный бриф и запуск генерации.",
+        reply_markup=mini_app_keyboard(context.settings.mini_app_url),
     )
 
 
@@ -93,30 +101,26 @@ async def mini_app(message: Message, context: AppContext, state: FSMContext) -> 
 async def menu_callback(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     user = await ensure_user_for_callback(callback, context)
-    if callback.message:
-        markup = _main_menu_markup(user, context)
-        text = await _welcome_text(context)
-        with suppress(Exception):
-            await callback.message.edit_text(text, reply_markup=markup)
-            await callback.answer()
-            return
-        await callback.message.answer(text, reply_markup=markup)
+    await _edit_or_answer(
+        callback,
+        await _welcome_text(context),
+        reply_markup=_main_menu_markup(user, context),
+    )
     await callback.answer()
 
 
-@router.message(F.text == "Еще")
-async def more(message: Message, context: AppContext, state: FSMContext) -> None:
+@router.message(F.text.in_({"Ещё", "Еще", "Профиль"}))
+async def account(message: Message, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     user = await ensure_user_for_message(message, context)
-    await message.answer("Еще", reply_markup=_more_menu_markup(user, context))
+    await message.answer("Профиль", reply_markup=_account_menu_markup(user, context))
 
 
-@router.callback_query(F.data == "menu:more")
-async def more_callback(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
+@router.callback_query(F.data.in_({"menu:account", "menu:more"}))
+async def account_callback(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     user = await ensure_user_for_callback(callback, context)
-    if callback.message:
-        await callback.message.answer("Еще", reply_markup=_more_menu_markup(user, context))
+    await _edit_or_answer(callback, "Профиль", reply_markup=_account_menu_markup(user, context))
     await callback.answer()
 
 
@@ -124,26 +128,24 @@ async def more_callback(callback: CallbackQuery, context: AppContext, state: FSM
 async def balance_callback(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     user = await ensure_user_for_callback(callback, context)
-    if callback.message:
-        await callback.message.answer(
-            await _balance_text(user, context), reply_markup=navigation_keyboard()
-        )
+    await _edit_or_answer(
+        callback,
+        await _balance_text(user, context),
+        reply_markup=balance_keyboard(),
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu:support")
 async def support_callback(callback: CallbackQuery) -> None:
+    await _edit_or_answer(
+        callback,
+        "<b>Поддержка</b>\n\n"
+        "Технические вопросы: @Chillcreative\n"
+        "Сотрудничество и реклама: @LeLu88",
+        reply_markup=navigation_keyboard(back_callback="menu:account"),
+    )
     await callback.answer()
-    if callback.message:
-        await callback.message.answer(
-            "🆘 <b>Поддержка BANANA</b>\n\n"
-            "По техническим вопросам и багам — пиши в <b>Тех. Отдел</b>\n"
-            "@Chillcreative\n\n"
-            "По вопросам сотрудничества и рекламы — пиши <b>Поддержка / Реклама</b>\n"
-            "@LeLu88",
-            parse_mode="HTML",
-            reply_markup=navigation_keyboard(back_callback="menu:more"),
-        )
 
 
 @router.message(Command("balance"))
@@ -151,87 +153,45 @@ async def support_callback(callback: CallbackQuery) -> None:
 async def balance(message: Message, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     user = await ensure_user_for_message(message, context)
-    await message.answer(await _balance_text(user, context), reply_markup=navigation_keyboard())
+    await message.answer(await _balance_text(user, context), reply_markup=balance_keyboard())
 
 
-async def _balance_text(user, context: AppContext) -> str:
+async def _balance_text(user: User, context: AppContext) -> str:
     async with session_scope(context.session_factory) as session:
         fresh_user = await session.get(User, user.id)
         if fresh_user:
             await ensure_partner_code(session, fresh_user)
             await session.flush()
             user = fresh_user
-        image_models = await list_enabled_models(session, "image")
-        video_models = await list_enabled_models(session, "video")
-        models = [*image_models, *video_models]
-    unlimited = ""
+    access = ""
     if user.is_admin:
-        unlimited = "\nАдмин-доступ: генерации без списания кредитов."
+        access = "\nДоступ: <b>администратор</b>"
     elif user_has_unlimited(user):
-        unlimited = f"\nБезлимит активен до: {user.unlimited_until:%Y-%m-%d %H:%M}"
-    affiliate = user.affiliate_balance_kopecks / 100
-    link = await build_ref_link(context.bot, user.partner_code)
-    generation_status = _generation_status_text(user, models)
-    text = (
-        "💰 <b>Ваш баланс</b>\n\n"
-        f"📸 Фото-кредиты: <b>{int(user.photo_credits_balance or 0)}</b>\n"
-        f"🎬 Видео-кредиты: <b>{int(user.video_credits_balance or 0)}</b>\n"
-        f"🪙 Универсальные: <b>{int(user.credits_balance or 0)}</b>{unlimited}\n"
-        f"💵 Партнёрский: <b>{affiliate:.0f} ₽</b>\n"
-        f"\n{generation_status}\n\n"
-        "🤝 <b>Партнёрская программа</b>\n"
-        "30% с покупок приглашённых пользователей.\n"
-        "Амбасадоры — 50%. Интересно? В поддержку!"
+        access = f"\nБезлимит до: <b>{user.unlimited_until:%d.%m.%Y %H:%M}</b>"
+    affiliate = int(user.affiliate_balance_kopecks or 0) / 100
+    return (
+        "<b>Баланс</b>\n\n"
+        f"Фото: <b>{int(user.photo_credits_balance or 0)}</b>\n"
+        f"Видео: <b>{int(user.video_credits_balance or 0)}</b>\n"
+        f"Универсальные: <b>{int(user.credits_balance or 0)}</b>\n"
+        f"Партнёрский баланс: <b>{affiliate:.0f} ₽</b>"
+        f"{access}"
     )
-    if link:
-        text += f"\n\n🔗 <b>Ваша партнёрская ссылка:</b>\n{link}"
-    return text
-
-
-def _generation_status_text(user: User, models: list) -> str:
-    if not models:
-        return "Статус генераций: модели сейчас недоступны."
-    lines = ["Статус генераций:"]
-    free_generation = user_generates_for_free(user)
-    for model in models:
-        price = int(model.price_credits or 0)
-        credit_type = model_credit_type(model)
-        balance = user_credit_balance(user, credit_type)
-        price_unit = "/сек" if (model.config or {}).get("price_unit") == "second" else ""
-        if free_generation or price <= 0:
-            available = "безлимит"
-        elif price_unit:
-            available = f"{max(0, balance // price)} сек"
-        else:
-            available = str(max(0, balance // price))
-        lines.append(
-            f"{escape(model.title)}: {_credit_amount_text(price, credit_type)}{price_unit} · "
-            f"доступно {available}"
-        )
-    return "\n".join(lines)
-
-
-def _credit_amount_text(value: int, credit_type: str) -> str:
-    if credit_type == "photo":
-        return f"{value} фото-кредитов"
-    if credit_type == "video":
-        return f"{value} видео-кредитов"
-    return f"{value} кредитов"
 
 
 @router.message(Command("help"))
 async def help_command(message: Message, context: AppContext, state: FSMContext) -> None:
     await state.clear()
     user = await ensure_user_for_message(message, context)
-    admin_hint = "\nАдминка: «Еще» -> «Админка» или /admin." if is_admin_user(user, context) else ""
+    admin_hint = "\n/admin — управление проектом" if is_admin_user(user, context) else ""
     await message.answer(
-        "Доступные разделы:\n"
-        "Banana - генерация изображений.\n"
-        "AI Video - видео по изображению и prompt.\n"
-        "BANANA - мини-апп для сборки визуального брифа.\n"
-        "Лента - публичные работы пользователей, лайки и повторы.\n"
-        "Галерея - публичные результаты и промпты.\n"
-        "Пакеты - пополнение кредитов и безлимит."
+        "<b>Команды</b>\n\n"
+        "/image — создать фото\n"
+        "/motion — создать видео\n"
+        "/feed — открыть ленту\n"
+        "/balance — посмотреть баланс\n"
+        "/packages — пополнить кредиты\n"
+        "/partners — партнёрская программа"
         f"{admin_hint}",
         reply_markup=navigation_keyboard(),
     )
