@@ -13,39 +13,27 @@ from redis.asyncio import Redis
 
 from app.config import Settings
 from app.context import AppContext
-from app.plugins.loader import load_plugins
+from app.services.financial_settings import validate_production_security
+from app.services.referrals import install_repository_patches
 
+install_repository_patches()
 
+from app.plugins.loader import load_plugins  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 class ActionLoggingMiddleware(BaseMiddleware):
-    async def __call__(
-        self,
-        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
-        event: TelegramObject,
-        data: dict[str, Any],
-    ) -> Any:
+    async def __call__(self, handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]], event: TelegramObject, data: dict[str, Any]) -> Any:
         started = time.monotonic()
         action = _event_action(event)
         telegram_id = _event_telegram_id(event)
         try:
             result = await handler(event, data)
         except Exception:
-            logger.exception(
-                "telegram_action_failed user_tg=%s action=%s duration_ms=%d",
-                telegram_id,
-                action,
-                int((time.monotonic() - started) * 1000),
-            )
+            logger.exception("telegram_action_failed user_tg=%s action=%s duration_ms=%d", telegram_id, action, int((time.monotonic() - started) * 1000))
             raise
-        logger.info(
-            "telegram_action_ok user_tg=%s action=%s duration_ms=%d",
-            telegram_id,
-            action,
-            int((time.monotonic() - started) * 1000),
-        )
+        logger.info("telegram_action_ok user_tg=%s action=%s duration_ms=%d", telegram_id, action, int((time.monotonic() - started) * 1000))
         return result
 
 
@@ -76,14 +64,21 @@ def _event_action(event: TelegramObject) -> str:
         return "message:document"
     return "message:text" if text else event.__class__.__name__
 
+
 def create_bot(settings: Settings) -> Bot:
-    return Bot(
-        token=settings.telegram_bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+    validate_production_security(settings)
+    return Bot(token=settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 
 def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
+    for required_plugin in ("feed", "finance"):
+        if required_plugin not in context.settings.enabled_plugins:
+            context.settings.enabled_plugins.append(required_plugin)
+    # UX patches depend on all feature modules being loaded first.
+    context.settings.enabled_plugins = [
+        name for name in context.settings.enabled_plugins if name != "ux"
+    ]
+    context.settings.enabled_plugins.append("ux")
     dispatcher = Dispatcher(storage=RedisStorage(redis=redis))
     dispatcher.message.middleware(ActionLoggingMiddleware())
     dispatcher.callback_query.middleware(ActionLoggingMiddleware())
@@ -96,19 +91,19 @@ async def register_bot_commands(bot: Bot, settings: Settings) -> None:
     default_commands = [
         BotCommand(command="start", description="Запустить бота"),
         BotCommand(command="menu", description="Главное меню"),
-        BotCommand(command="app", description="Открыть BANANA"),
-        BotCommand(command="image", description="Banana: фото по референсу"),
-        BotCommand(command="motion", description="AI Video: видео по референсу"),
-        BotCommand(command="balance", description="Баланс, лимиты и партнерка"),
+        BotCommand(command="app", description="Открыть студию BANANA"),
+        BotCommand(command="image", description="Создать фото"),
+        BotCommand(command="motion", description="Создать видео"),
+        BotCommand(command="feed", description="Лента работ"),
+        BotCommand(command="balance", description="Баланс"),
         BotCommand(command="packages", description="Пополнить кредиты"),
-        BotCommand(command="gallery", description="Галерея работ"),
-        BotCommand(command="feed", description="Публичная лента"),
-        BotCommand(command="partners", description="Партнерская программа"),
+        BotCommand(command="partners", description="Партнёрская программа"),
         BotCommand(command="help", description="Помощь"),
     ]
     admin_commands = [
         *default_commands,
-        BotCommand(command="admin", description="Админка"),
+        BotCommand(command="admin", description="Управление проектом"),
+        BotCommand(command="finance", description="Финансовая аналитика"),
     ]
     await bot.set_my_commands(default_commands, scope=BotCommandScopeDefault())
     for admin_id in settings.admin_ids:

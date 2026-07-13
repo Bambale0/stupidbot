@@ -1,0 +1,105 @@
+name: Financial integrity
+
+on:
+  push:
+    branches: [dev, main, master]
+  pull_request:
+    branches: [dev, main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: financial-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: stupidbot_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d stupidbot_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: ci
+      DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/stupidbot_ci
+      REDIS_URL: redis://127.0.0.1:6379/0
+      PHOTO_CREDIT_VALUE_KOPECKS: "3900"
+      VIDEO_CREDIT_VALUE_KOPECKS: "10000"
+      CUSTOM_CREDIT_SALES_ENABLED: "false"
+      UNLIMITED_SALES_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          set -Eeuo pipefail
+          python -m pip install -U pip setuptools wheel
+          python -m pip install -e ".[dev]"
+      - name: Compile
+        run: python -m compileall -q app scripts
+      - name: Deployment safety regression
+        run: python scripts/regression_deployment_safety.py
+      - name: Bot UX regression
+        run: python scripts/regression_bot_ux.py
+      - name: Reference reuse regression
+        run: python scripts/reference_regression.py
+      - name: Disabled backend contract regression
+        run: python scripts/regression_backend_contracts.py
+      - name: Gallery compatibility regression
+        run: python scripts/regression_gallery_compat.py
+      - name: Apply Alembic migrations
+        run: python -m scripts.migrate_db
+      - name: Runtime readiness
+        run: python scripts/runtime_readiness.py
+      - name: Financial regression
+        run: |
+          set -Eeuo pipefail
+          python scripts/regression_financial.py 2>&1 | tee financial-regression.log
+      - name: Full current-policy regression
+        run: |
+          set -Eeuo pipefail
+          python scripts/regression_500_current.py 2>&1 | tee full-regression.log
+      - name: Transactional staging database smoke
+        run: python scripts/staging_issue3_db_smoke.py
+      - name: Verify PostgreSQL backup restore
+        run: |
+          set -Eeuo pipefail
+          pg_dump --format=custom --no-owner --no-privileges \
+            --file=/tmp/stupidbot-ci.dump \
+            postgresql://postgres@127.0.0.1:5432/stupidbot_ci
+          chmod 700 ops/verify_postgres_restore.sh
+          ops/verify_postgres_restore.sh \
+            "${DATABASE_URL}" \
+            postgresql://postgres@127.0.0.1:5432/stupidbot_ci \
+            /tmp/stupidbot-ci.dump \
+            "${GITHUB_WORKSPACE}"
+      - name: Upload regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-logs
+          path: |
+            financial-regression.log
+            full-regression.log
+          if-no-files-found: warn

@@ -33,9 +33,7 @@ class TBankClient:
         notification_url: str,
         customer_key: str,
     ) -> dict[str, Any]:
-        if not self.is_configured:
-            raise TBankError("TBANK_TERMINAL_KEY and TBANK_PASSWORD are not configured")
-
+        self._require_configured()
         payload: dict[str, Any] = {
             "TerminalKey": self.terminal_key,
             "Amount": amount_kopecks,
@@ -48,11 +46,56 @@ class TBankClient:
             payload["SuccessURL"] = self.success_url
         if self.fail_url:
             payload["FailURL"] = self.fail_url
-        payload["Token"] = self._token(payload)
+        return await self._post("/Init", payload)
 
-        async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
-            response = await client.post("/Init", json=payload)
-        return self._decode(response)
+    async def get_state(self, payment_id: str) -> dict[str, Any]:
+        """Return the current T-Bank payment state via /GetState."""
+
+        self._require_configured()
+        payment_id = str(payment_id or "").strip()
+        if not payment_id:
+            raise TBankError("PaymentId is required")
+        return await self._post(
+            "/GetState",
+            {
+                "TerminalKey": self.terminal_key,
+                "PaymentId": payment_id,
+            },
+        )
+
+    async def cancel_payment(
+        self,
+        payment_id: str,
+        *,
+        amount_kopecks: int | None = None,
+    ) -> dict[str, Any]:
+        """Cancel or refund a payment via /Cancel.
+
+        Omitting amount_kopecks requests a full cancellation/refund. This method
+        intentionally does not build fiscal receipts for partial refunds.
+        """
+
+        self._require_configured()
+        payment_id = str(payment_id or "").strip()
+        if not payment_id:
+            raise TBankError("PaymentId is required")
+        payload: dict[str, Any] = {
+            "TerminalKey": self.terminal_key,
+            "PaymentId": payment_id,
+        }
+        if amount_kopecks is not None:
+            amount = int(amount_kopecks)
+            if amount <= 0:
+                raise TBankError("Amount must be positive")
+            payload["Amount"] = amount
+        return await self._post("/Cancel", payload)
+
+    def sign_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of a flat callback/request payload with a valid Token."""
+
+        signed = {key: value for key, value in payload.items() if key != "Token"}
+        signed["Token"] = self._token(signed)
+        return signed
 
     def verify_notification(self, payload: dict[str, Any]) -> bool:
         if not self.password:
@@ -62,6 +105,16 @@ class TBankClient:
             return False
         actual = self._token({key: value for key, value in payload.items() if key != "Token"})
         return hmac.compare_digest(str(expected).lower(), actual.lower())
+
+    async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        signed = self.sign_payload(payload)
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
+            response = await client.post(path, json=signed)
+        return self._decode(response)
+
+    def _require_configured(self) -> None:
+        if not self.is_configured:
+            raise TBankError("TBANK_TERMINAL_KEY and TBANK_PASSWORD are not configured")
 
     def _token(self, payload: dict[str, Any]) -> str:
         if not self.password:

@@ -4,9 +4,9 @@ from html import escape
 import logging
 
 from aiogram import Dispatcher, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
@@ -17,14 +17,9 @@ from app.models import CreditPackage, Payment
 from app.plugins.common import ensure_user_for_callback, ensure_user_for_message
 from app.repositories import list_packages
 from app.services.payments import (
-    CUSTOM_CREDIT_MAX_AMOUNT,
-    CUSTOM_CREDIT_MIN_AMOUNT,
-    CUSTOM_CREDIT_PRICE_RUB,
     PackagePaymentInit,
-    PaymentCreditAmountInvalid,
     PaymentPackageUnavailable,
     PaymentProviderError,
-    create_custom_credit_payment,
     create_package_payment,
 )
 from app.ui import add_navigation_buttons, navigation_keyboard, package_credits_text, packages_keyboard
@@ -33,11 +28,7 @@ router = Router(name="payments")
 logger = logging.getLogger(__name__)
 
 
-class PaymentStates(StatesGroup):
-    custom_credits = State()
-
-
-@router.message(F.text == "Пакеты")
+@router.message(F.text.in_({"Пакеты", "Пополнить"}))
 @router.message(Command("packages"))
 async def packages(message: Message, context: AppContext, state: FSMContext) -> None:
     await state.clear()
@@ -50,25 +41,69 @@ async def packages_callback(callback: CallbackQuery, context: AppContext, state:
     await state.clear()
     await ensure_user_for_callback(callback, context)
     if callback.message:
-        await _send_packages(callback.message, context)
+        await _send_packages(callback.message, context, edit=True)
     await callback.answer()
 
 
-async def _send_packages(message: Message, context: AppContext) -> None:
+async def _send_packages(message: Message, context: AppContext, *, edit: bool = False) -> None:
     async with session_scope(context.session_factory) as session:
-        items = await list_packages(session, only_enabled=True)
-    await message.answer(_packages_text(items), reply_markup=packages_keyboard(items))
+        items = [
+            package
+            for package in await list_packages(session, only_enabled=True)
+            if not package.is_unlimited
+        ]
+    text = (
+        "<b>Пополнение</b>\n\nВыберите пакет. Перед оплатой покажу состав и условия."
+        if items
+        else "<b>Пополнение</b>\n\nПакеты временно недоступны."
+    )
+    markup = packages_keyboard(items)
+    if edit:
+        try:
+            await message.edit_text(text, reply_markup=markup)
+            return
+        except TelegramBadRequest as exc:
+            error = str(exc).lower()
+            if "message is not modified" in error:
+                return
+            if "there is no text in the message to edit" not in error:
+                raise
+    await message.answer(text, reply_markup=markup)
 
 
+@router.callback_query(F.data.startswith("pay:preview:"))
 @router.callback_query(F.data.startswith("pay:package:"))
-async def package_selected(callback: CallbackQuery, context: AppContext) -> None:
-    user = await ensure_user_for_callback(callback, context)
-    try:
-        package_id = int(callback.data.removeprefix("pay:package:"))
-    except ValueError:
+async def package_preview(callback: CallbackQuery, context: AppContext) -> None:
+    await ensure_user_for_callback(callback, context)
+    package_id = _package_id_from_callback(callback.data)
+    if not package_id:
         await callback.answer("Пакет недоступен", show_alert=True)
         return
-    await callback.answer("Создаю ссылку на оплату...")
+    async with session_scope(context.session_factory) as session:
+        package = await session.get(CreditPackage, package_id)
+    if not package or not package.is_enabled or package.is_unlimited:
+        await callback.answer("Пакет недоступен", show_alert=True)
+        return
+    if callback.message:
+        text = _package_preview_text(package)
+        markup = _package_preview_keyboard(package.id)
+        try:
+            await callback.message.edit_text(text, reply_markup=markup)
+        except TelegramBadRequest as exc:
+            error = str(exc).lower()
+            if "message is not modified" not in error:
+                await callback.message.answer(text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pay:create:"))
+async def package_payment_create(callback: CallbackQuery, context: AppContext) -> None:
+    user = await ensure_user_for_callback(callback, context)
+    package_id = _callback_int(callback.data, "pay:create:")
+    if not package_id:
+        await callback.answer("Пакет недоступен", show_alert=True)
+        return
+    await callback.answer("Создаю оплату...")
     try:
         result = await create_package_payment(
             context,
@@ -80,7 +115,7 @@ async def package_selected(callback: CallbackQuery, context: AppContext) -> None
     except PaymentPackageUnavailable:
         if callback.message:
             await callback.message.answer(
-                "Пакет недоступен. Откройте список пакетов и выберите актуальный вариант.",
+                "Пакет больше недоступен. Выберите другой вариант.",
                 reply_markup=navigation_keyboard(back_callback="menu:packages"),
             )
         return
@@ -88,75 +123,18 @@ async def package_selected(callback: CallbackQuery, context: AppContext) -> None
         logger.exception("Payment creation failed")
         if callback.message:
             await callback.message.answer(
-                "Не получилось создать ссылку на оплату. Попробуйте позже.",
+                "Не получилось создать оплату. Попробуйте позже.",
                 reply_markup=navigation_keyboard(back_callback="menu:packages"),
             )
         return
 
-    if not callback.message:
-        return
-    await _send_payment_result(callback.message, result)
+    if callback.message:
+        await _send_payment_result(callback.message, result)
 
 
 @router.callback_query(F.data == "pay:custom")
-async def custom_credits_prompt(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
-    await ensure_user_for_callback(callback, context)
-    await state.set_state(PaymentStates.custom_credits)
-    if callback.message:
-        await callback.message.answer(
-            "Введите количество универсальных кредитов для покупки.\n\n"
-            f"Курс: 1 кредит = {_format_price(CUSTOM_CREDIT_PRICE_RUB)}.\n"
-            f"Можно купить от {CUSTOM_CREDIT_MIN_AMOUNT} до {CUSTOM_CREDIT_MAX_AMOUNT} кредитов.",
-            reply_markup=navigation_keyboard(back_callback="menu:packages"),
-        )
-    await callback.answer()
-
-
-@router.message(PaymentStates.custom_credits, F.text)
-async def custom_credits_apply(message: Message, context: AppContext, state: FSMContext) -> None:
-    user = await ensure_user_for_message(message, context)
-    raw_value = message.text.strip().replace(" ", "")
-    try:
-        credits = int(raw_value)
-    except ValueError:
-        await message.answer(
-            "Введите целое количество кредитов, например 25.",
-            reply_markup=navigation_keyboard(back_callback="menu:packages"),
-        )
-        return
-
-    try:
-        result = await create_custom_credit_payment(
-            context,
-            user_id=user.id,
-            credits=credits,
-            customer_key=str(user.telegram_id),
-            source="bot",
-        )
-    except PaymentCreditAmountInvalid:
-        await message.answer(
-            f"Количество должно быть от {CUSTOM_CREDIT_MIN_AMOUNT} до {CUSTOM_CREDIT_MAX_AMOUNT}.",
-            reply_markup=navigation_keyboard(back_callback="menu:packages"),
-        )
-        return
-    except PaymentProviderError:
-        logger.exception("Custom credit payment creation failed")
-        await message.answer(
-            "Не получилось создать ссылку на оплату. Попробуйте позже.",
-            reply_markup=navigation_keyboard(back_callback="menu:packages"),
-        )
-        await state.clear()
-        return
-    except PaymentPackageUnavailable:
-        await message.answer(
-            "Не получилось создать заявку. Откройте раздел «Пакеты» и попробуйте еще раз.",
-            reply_markup=navigation_keyboard(back_callback="menu:packages"),
-        )
-        await state.clear()
-        return
-
-    await state.clear()
-    await _send_payment_result(message, result)
+async def custom_credits_disabled(callback: CallbackQuery) -> None:
+    await callback.answer("Выберите один из готовых пакетов.", show_alert=True)
 
 
 @router.message(F.text == "Оплаты")
@@ -173,6 +151,14 @@ def setup(dispatcher: Dispatcher, context: AppContext) -> None:
     dispatcher.include_router(router)
 
 
+def _package_preview_keyboard(package_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Перейти к оплате", callback_data=f"pay:create:{package_id}")
+    nav_count = add_navigation_buttons(builder, back_callback="menu:packages")
+    builder.adjust(1, nav_count)
+    return builder.as_markup()
+
+
 def _payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Открыть оплату", url=payment_url)
@@ -181,53 +167,35 @@ def _payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def _packages_text(packages: list[CreditPackage]) -> str:
-    lines = [
-        "Пополнение кредитов:",
-        "",
-        f"Свое количество: 1 универсальный кредит = {_format_price(CUSTOM_CREDIT_PRICE_RUB)}.",
-    ]
-    if packages:
-        lines.append("")
-        lines.append("Готовые пакеты:")
-    else:
-        lines.append("Готовые пакеты пока не настроены.")
-    for package in packages:
-        lines.append("")
-        lines.append(_package_summary_text(package))
-    return "\n".join(lines)
+def _package_preview_text(package: CreditPackage) -> str:
+    description = str(package.description or "").strip()
+    description_text = f"\n\n{escape(description)}" if description else ""
+    return (
+        f"<b>{escape(package.title)}</b>\n\n"
+        f"В пакете: <b>{escape(package_credits_text(package))}</b>\n"
+        f"Цена: <b>{_format_price(package.price_rub)}</b>"
+        f"{description_text}\n\n"
+        f"{escape(_package_terms_text(package))}"
+    )
 
 
 async def _send_payment_result(message: Message, result: PackagePaymentInit) -> None:
     if result.status == "manual_pending":
         await message.answer(
-            "Онлайн-оплата пока не настроена. Заявка создана, администратор сможет отметить ее "
-            f"оплаченной в админке.\n\n{_payment_result_text(result)}",
+            "Заявка создана. После подтверждения администратором кредиты появятся на балансе.\n\n"
+            f"{_payment_result_text(result)}",
             reply_markup=navigation_keyboard(back_callback="menu:packages"),
         )
         return
     if result.payment_url:
         await message.answer(
-            f"{_payment_result_text(result)}\n\n"
-            "После оплаты я пришлю сюда уведомление и обновленный баланс.",
+            f"{_payment_result_text(result)}\n\nПосле оплаты баланс обновится автоматически.",
             reply_markup=_payment_keyboard(result.payment_url),
         )
         return
     await message.answer(
-        "Платеж создан, но платежная ссылка не вернулась.",
+        "Платёж создан, но ссылка не получена. Попробуйте ещё раз позже.",
         reply_markup=navigation_keyboard(back_callback="menu:packages"),
-    )
-
-
-def _package_summary_text(package: CreditPackage) -> str:
-    description = str(package.description or "").strip()
-    description_text = f"\nОписание: {escape(description)}" if description else ""
-    return (
-        f"<b>{escape(package.title)}</b>\n"
-        f"Что входит: <b>{escape(_package_amount_text(package))}</b>\n"
-        f"Цена: <b>{_format_price(package.price_rub)}</b>"
-        f"{description_text}\n"
-        f"Условия: {escape(_package_terms_text(package))}"
     )
 
 
@@ -236,26 +204,13 @@ def _payment_result_text(result: PackagePaymentInit) -> str:
     return (
         f"Пакет: <b>{escape(str(snapshot.get('title') or 'пакет'))}</b>\n"
         f"Начисление: <b>{escape(_snapshot_amount_text(snapshot))}</b>\n"
-        f"Сумма: <b>{_format_price_from_kopecks(result.amount_kopecks)}</b>\n"
-        f"Заявка: <b>№{result.payment_id}</b>"
-        f"\nУсловия: {escape(_snapshot_terms_text(snapshot))}"
+        f"Сумма: <b>{_format_price_from_kopecks(result.amount_kopecks)}</b>"
     )
-
-
-def _package_amount_text(package: CreditPackage) -> str:
-    return package_credits_text(package)
 
 
 def _package_terms_text(package: CreditPackage) -> str:
     terms = str(package.terms or "").strip()
-    if terms:
-        return terms
-    if package.is_unlimited:
-        days = int(package.duration_days or 0)
-        if days > 0:
-            return f"Безлимит действует {days} д. с момента подтверждения оплаты."
-        return "Безлимит активируется после подтверждения оплаты."
-    return "Кредиты зачисляются на баланс сразу после подтверждения оплаты."
+    return terms or "Кредиты зачисляются сразу после подтверждения оплаты."
 
 
 def _format_price(price_rub: object) -> str:
@@ -268,9 +223,6 @@ def _format_price_from_kopecks(amount_kopecks: int) -> str:
 
 def _snapshot_amount_text(snapshot: dict[str, object]) -> str:
     parts: list[str] = []
-    if bool(snapshot.get("is_unlimited")):
-        days = _snapshot_int(snapshot.get("duration_days"))
-        parts.append(f"безлимит на {days} д." if days > 0 else "безлимит")
     photo_credits = _snapshot_int(snapshot.get("photo_credits"))
     video_credits = _snapshot_int(snapshot.get("video_credits"))
     common_credits = _snapshot_int(snapshot.get("credits"))
@@ -283,16 +235,22 @@ def _snapshot_amount_text(snapshot: dict[str, object]) -> str:
     return " + ".join(parts) if parts else "0 кредитов"
 
 
-def _snapshot_terms_text(snapshot: dict[str, object]) -> str:
-    terms = str(snapshot.get("terms") or "").strip()
-    if terms:
-        return terms
-    if bool(snapshot.get("is_unlimited")):
-        days = _snapshot_int(snapshot.get("duration_days"))
-        if days > 0:
-            return f"Безлимит действует {days} д. с момента подтверждения оплаты."
-        return "Безлимит активируется после подтверждения оплаты."
-    return "Кредиты зачисляются на баланс сразу после подтверждения оплаты."
+def _package_id_from_callback(value: str | None) -> int:
+    for prefix in ("pay:preview:", "pay:package:"):
+        result = _callback_int(value, prefix)
+        if result:
+            return result
+    return 0
+
+
+def _callback_int(value: str | None, prefix: str) -> int:
+    if not value or not value.startswith(prefix):
+        return 0
+    try:
+        result = int(value.removeprefix(prefix))
+    except ValueError:
+        return 0
+    return result if result > 0 else 0
 
 
 def _snapshot_int(value: object) -> int:

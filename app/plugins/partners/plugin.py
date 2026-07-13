@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from html import escape
+
 from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -15,7 +16,7 @@ from app.models import AffiliateWithdrawal, PartnerLink, User
 from app.plugins.common import ensure_user_for_callback, ensure_user_for_message, is_admin_user
 from app.repositories import ensure_partner_code, get_enabled_partner_links
 from app.services.referrals import build_ref_link
-from app.ui import MAIN_MENU_CALLBACK, add_navigation_buttons, navigation_keyboard
+from app.ui import ACCOUNT_MENU_CALLBACK, add_navigation_buttons, navigation_keyboard
 
 router = Router(name="partners")
 
@@ -24,7 +25,7 @@ class PartnerStates(StatesGroup):
     withdrawal_details = State()
 
 
-@router.message(F.text.in_({"Партнеры", "Партнерка"}))
+@router.message(F.text.in_({"Партнёры", "Партнеры", "Партнёрская программа", "Партнерка"}))
 @router.message(Command("partners"))
 async def partners(message: Message, context: AppContext, state: FSMContext) -> None:
     await state.clear()
@@ -48,12 +49,10 @@ async def _send_partners(message: Message, context: AppContext, user_id: int) ->
         if user:
             await ensure_partner_code(session, user)
             partner_code = user.partner_code
-            affiliate_balance = user.affiliate_balance_kopecks
-            affiliate_earned = user.affiliate_earned_kopecks
-            rate_bps = (
-                3000
-                if user.affiliate_commission_rate_bps is None
-                else user.affiliate_commission_rate_bps
+            affiliate_balance = int(user.affiliate_balance_kopecks or 0)
+            affiliate_earned = int(user.affiliate_earned_kopecks or 0)
+            rate_bps = 3000 if user.affiliate_commission_rate_bps is None else int(
+                user.affiliate_commission_rate_bps
             )
         else:
             partner_code = None
@@ -62,23 +61,18 @@ async def _send_partners(message: Message, context: AppContext, user_id: int) ->
             rate_bps = 3000
     ref_link = await build_ref_link(context.bot, partner_code)
     text = (
-        "Партнерская программа\n\n"
-        "Вы получаете 30% с покупок приглашенных пользователей на партнерский баланс.\n"
-        "Амбасадоры получают 50%.\n"
-        "Хотите стать амбасадором? Напишите в поддержку.\n\n"
-        f"Ваша ставка: {rate_bps / 100:.0f}%\n"
-        f"Начислено всего: {affiliate_earned / 100:.0f} ₽\n"
-        f"Доступно: {affiliate_balance / 100:.0f} ₽"
+        "<b>Партнёрская программа</b>\n\n"
+        f"Ставка: <b>{rate_bps / 100:.0f}%</b>\n"
+        f"Заработано: <b>{affiliate_earned / 100:.0f} ₽</b>\n"
+        f"Доступно к выводу: <b>{affiliate_balance / 100:.0f} ₽</b>"
     )
     if ref_link:
         text += f"\n\nВаша ссылка:\n{ref_link}"
-    if not links:
-        await message.answer(text, reply_markup=_partner_keyboard([], affiliate_balance > 0))
-        return
-    await message.answer(
-        text + "\n\nПолезные ссылки:",
-        reply_markup=_partner_keyboard(links, affiliate_balance > 0),
-    )
+    if rate_bps < 5000:
+        text += "\n\nСтатус амбассадора и ставка 50% — через поддержку."
+    if links:
+        text += "\n\nПолезные ссылки:"
+    await message.answer(text, reply_markup=_partner_keyboard(links, affiliate_balance > 0))
 
 
 @router.callback_query(F.data == "partner:withdraw")
@@ -88,14 +82,14 @@ async def withdraw_prompt(callback: CallbackQuery, context: AppContext, state: F
         fresh_user = await session.get(User, user.id)
         balance = int(fresh_user.affiliate_balance_kopecks or 0) if fresh_user else 0
     if balance <= 0:
-        await callback.answer("Нет доступных средств для вывода", show_alert=True)
+        await callback.answer("Нет средств для вывода", show_alert=True)
         return
     await state.set_state(PartnerStates.withdrawal_details)
     if callback.message:
         await callback.message.answer(
-            "Вывод средств\n\n"
-            f"Доступно к выводу: {balance / 100:.0f} ₽.\n"
-            "Отправьте реквизиты для выплаты одним сообщением: банк/карта/телефон или другой способ связи.",
+            "<b>Запрос на вывод</b>\n\n"
+            f"Доступно: <b>{balance / 100:.0f} ₽</b>\n"
+            "Отправьте реквизиты одним сообщением: банк, карта или телефон.",
             reply_markup=navigation_keyboard(back_callback="menu:partners"),
         )
     await callback.answer()
@@ -107,7 +101,7 @@ async def withdraw_create(message: Message, context: AppContext, state: FSMConte
     details = (message.text or "").strip()
     if len(details) < 5:
         await message.answer(
-            "Добавьте реквизиты подробнее: банк/карта/телефон или контакт для связи.",
+            "Укажите банк и реквизиты подробнее.",
             reply_markup=navigation_keyboard(back_callback="menu:partners"),
         )
         return
@@ -120,7 +114,7 @@ async def withdraw_create(message: Message, context: AppContext, state: FSMConte
             return
         amount = int(fresh_user.affiliate_balance_kopecks or 0)
         if amount <= 0:
-            await message.answer("Нет доступных средств для вывода.", reply_markup=navigation_keyboard())
+            await message.answer("Нет средств для вывода.", reply_markup=navigation_keyboard())
             await state.clear()
             return
         fresh_user.affiliate_balance_kopecks = 0
@@ -137,9 +131,9 @@ async def withdraw_create(message: Message, context: AppContext, state: FSMConte
         username = fresh_user.username
     await state.clear()
     await message.answer(
-        "Заявка на вывод создана.\n\n"
-        f"Сумма: {amount / 100:.0f} ₽\n"
-        "Средства зарезервированы до обработки администратором.",
+        "Заявка создана.\n\n"
+        f"Сумма: <b>{amount / 100:.0f} ₽</b>\n"
+        "Средства зарезервированы до обработки.",
         reply_markup=navigation_keyboard(back_callback="menu:partners"),
     )
     await _notify_admins_about_withdrawal(
@@ -160,7 +154,7 @@ async def withdrawal_paid(callback: CallbackQuery, context: AppContext) -> None:
     async with session_scope(context.session_factory) as session:
         withdrawal = await session.get(AffiliateWithdrawal, withdrawal_id, with_for_update=True)
         if not withdrawal or withdrawal.status != "pending":
-            await callback.answer("Заявка не найдена или уже обработана", show_alert=True)
+            await callback.answer("Заявка уже обработана", show_alert=True)
             return
         withdrawal.status = "paid"
         user = await session.get(User, withdrawal.user_id)
@@ -170,9 +164,9 @@ async def withdrawal_paid(callback: CallbackQuery, context: AppContext) -> None:
         with suppress(Exception):
             await context.bot.send_message(
                 notify_chat_id,
-                f"Вывод средств выполнен.\n\nСумма: {amount / 100:.0f} ₽",
+                f"Выплата выполнена.\n\nСумма: <b>{amount / 100:.0f} ₽</b>",
             )
-    await callback.answer("Вывод отмечен выплаченным", show_alert=True)
+    await callback.answer("Отмечено выплаченным", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("partner:withdrawal:reject:"))
@@ -183,7 +177,7 @@ async def withdrawal_reject(callback: CallbackQuery, context: AppContext) -> Non
     async with session_scope(context.session_factory) as session:
         withdrawal = await session.get(AffiliateWithdrawal, withdrawal_id, with_for_update=True)
         if not withdrawal or withdrawal.status != "pending":
-            await callback.answer("Заявка не найдена или уже обработана", show_alert=True)
+            await callback.answer("Заявка уже обработана", show_alert=True)
             return
         user = await session.get(User, withdrawal.user_id, with_for_update=True)
         withdrawal.status = "rejected"
@@ -196,9 +190,9 @@ async def withdrawal_reject(callback: CallbackQuery, context: AppContext) -> Non
         with suppress(Exception):
             await context.bot.send_message(
                 notify_chat_id,
-                "Заявка на вывод отклонена. Средства возвращены на партнерский баланс.",
+                "Заявка отклонена. Средства возвращены на партнёрский баланс.",
             )
-    await callback.answer("Вывод отклонен, баланс возвращен", show_alert=True)
+    await callback.answer("Средства возвращены", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("partner:open:"))
@@ -222,10 +216,10 @@ def setup(dispatcher: Dispatcher, context: AppContext) -> None:
 def _partner_keyboard(links: list[PartnerLink], can_withdraw: bool):
     builder = InlineKeyboardBuilder()
     if can_withdraw:
-        builder.button(text="Вывести средства", callback_data="partner:withdraw")
+        builder.button(text="Запросить вывод", callback_data="partner:withdraw")
     for link in links:
         builder.button(text=link.title, callback_data=f"partner:open:{link.id}")
-    nav_count = add_navigation_buttons(builder, back_callback=MAIN_MENU_CALLBACK)
+    nav_count = add_navigation_buttons(builder, back_callback=ACCOUNT_MENU_CALLBACK)
     rows = []
     if can_withdraw:
         rows.append(1)
@@ -254,10 +248,10 @@ async def _notify_admins_about_withdrawal(
 ) -> None:
     if not context.bot:
         return
-    username_line = f"@{escape(username)}" if username else "-"
+    username_line = f"@{escape(username)}" if username else "—"
     text = (
-        "Новая заявка на вывод партнерских средств\n\n"
-        f"ID заявки: <code>{withdrawal_id}</code>\n"
+        "<b>Новая заявка на вывод</b>\n\n"
+        f"Заявка: <code>#{withdrawal_id}</code>\n"
         f"Пользователь: <code>{telegram_id}</code> {username_line}\n"
         f"Сумма: <b>{amount_kopecks / 100:.0f} ₽</b>\n\n"
         f"Реквизиты:\n<code>{escape(details)}</code>"

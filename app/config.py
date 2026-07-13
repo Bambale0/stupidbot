@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     tbank_password: str | None = None
     tbank_success_url: str | None = None
     tbank_fail_url: str | None = None
+    tbank_test_smoke_enabled: bool = False
 
     enabled_plugins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
