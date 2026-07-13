@@ -1,0 +1,152 @@
+name: Provider paid smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider to test
+        required: true
+        type: choice
+        options:
+          - comet
+          - kie
+          - both
+      confirmation:
+        description: Type RUN_PAID_SMOKE to approve real billable generation
+        required: true
+        type: string
+      timeout_seconds:
+        description: Maximum KIE polling time
+        required: true
+        default: "900"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: stupidbot-provider-paid-smoke
+  cancel-in-progress: false
+
+jobs:
+  paid-smoke:
+    name: Run explicitly approved paid smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: staging
+    env:
+      STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+      STAGING_SSH_PORT: ${{ secrets.STAGING_SSH_PORT }}
+      STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+      STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+      STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+      STAGING_APP_DIR: /root/stupidbot
+      SMOKE_PROVIDER: ${{ inputs.provider }}
+      SMOKE_CONFIRMATION: ${{ inputs.confirmation }}
+      SMOKE_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+    steps:
+      - name: Validate explicit approval and access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "${SMOKE_CONFIRMATION}" == "RUN_PAID_SMOKE" ]] || {
+            echo "Paid provider calls were not approved. Type RUN_PAID_SMOKE exactly." >&2
+            exit 78
+          }
+          [[ "${SMOKE_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || {
+            echo "timeout_seconds must be an integer" >&2
+            exit 2
+          }
+          (( SMOKE_TIMEOUT_SECONDS >= 60 && SMOKE_TIMEOUT_SECONDS <= 1200 )) || {
+            echo "timeout_seconds must be between 60 and 1200" >&2
+            exit 2
+          }
+          missing=()
+          for name in \
+            STAGING_SSH_HOST \
+            STAGING_SSH_USER \
+            STAGING_SSH_PRIVATE_KEY \
+            STAGING_SSH_KNOWN_HOSTS
+          do
+            [[ -n "${!name:-}" ]] || missing+=("${name}")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required staging secrets: %s\n' "${missing[*]}" >&2
+            exit 78
+          fi
+          echo "STAGING_SSH_PORT=${STAGING_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run paid smoke on staging
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
+          ssh -p "${STAGING_SSH_PORT}" "${remote}" bash -s -- \
+            "${STAGING_APP_DIR}" \
+            "${SMOKE_PROVIDER}" \
+            "${SMOKE_CONFIRMATION}" \
+            "${SMOKE_TIMEOUT_SECONDS}" <<'REMOTE' 2>&1 | tee provider-paid-smoke.log
+          set -Eeuo pipefail
+          app_dir=$1
+          provider=$2
+          confirmation=$3
+          timeout_seconds=$4
+          cd "${app_dir}"
+          set -a
+          # shellcheck disable=SC1091
+          source .env
+          set +a
+          python3 scripts/provider_paid_smoke.py \
+            --provider "${provider}" \
+            --confirm "${confirmation}" \
+            --timeout-seconds "${timeout_seconds}"
+          REMOTE
+
+      - name: Upload paid smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-paid-smoke-${{ github.run_id }}
+          path: provider-paid-smoke.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish issue status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -Eeuo pipefail
+          result=failed
+          if [[ -f provider-paid-smoke.log ]] \
+            && grep -q 'Paid smoke passed:' provider-paid-smoke.log; then
+            result=passed
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          cat > provider-status.md <<EOF
+          ## Provider paid smoke: ${result}
+
+          - Provider: \`${SMOKE_PROVIDER}\`
+          - GitHub job status: \`${JOB_STATUS}\`
+          - Run: ${run_url}
+          - Billable provider calls: explicitly approved by workflow input
+          - Transactional DB lifecycle: test data rolled back
+
+          Evidence is stored in the workflow artifact. API keys and generated media are not included.
+          EOF
+          gh issue comment 3 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file provider-status.md
