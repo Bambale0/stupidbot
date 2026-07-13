@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     env:
       APP_ENV: ci
-      DATABASE_URL: sqlite+aiosqlite:///./stupidbot_release_ci.sqlite3
+      DATABASE_URL: sqlite+aiosqlite:///./stupidbot_release_contracts.sqlite3
       AUTO_CREATE_DB: "true"
       ADMIN_IDS: "1001"
       ENABLED_PLUGINS: core,generation,gallery,feed,partners,payments,admin
@@ -28,10 +28,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install
-        run: |
-          set -Eeuo pipefail
-          python -m pip install -U pip setuptools wheel
-          python -m pip install -e ".[dev]"
+        run: python -m pip install -q -e ".[dev]"
       - name: Compile
         run: python -m compileall -q app scripts
       - name: Deployment safety
@@ -44,7 +41,43 @@ jobs:
         run: python scripts/regression_backend_contracts.py
       - name: Gallery compatibility
         run: python scripts/regression_gallery_compat.py
+
+  admin-sqlite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: ci
+      DATABASE_URL: sqlite+aiosqlite:///./stupidbot_admin_ci.sqlite3
+      AUTO_CREATE_DB: "true"
+      ADMIN_IDS: "1001"
+      ENABLED_PLUGINS: core,generation,gallery,feed,partners,payments,admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -q -e ".[dev]"
       - name: Admin SQLite smoke
         run: python scripts/admin_smoke.py
+
+  broad-sqlite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: ci
+      DATABASE_URL: sqlite+aiosqlite:///./stupidbot_broad_ci.sqlite3
+      AUTO_CREATE_DB: "true"
+      ADMIN_IDS: "1001"
+      ENABLED_PLUGINS: core,generation,gallery,feed,partners,payments,admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -q -e ".[dev]"
       - name: Broad current-policy SQLite regression
         run: python scripts/regression_500_current.py
