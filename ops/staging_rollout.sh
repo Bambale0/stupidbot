@@ -156,7 +156,7 @@ cd "${app_dir}"
 python3 -m compileall -q app scripts
 python3 -m scripts.init_db
 python3 scripts/admin_smoke.py
-python3 scripts/regression_500.py
+python3 scripts/regression_500_current.py
 python3 scripts/staging_issue3_db_smoke.py
 restart_service
 
