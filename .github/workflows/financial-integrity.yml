@@ -64,6 +64,8 @@ jobs:
         run: python scripts/regression_bot_ux.py
       - name: Reference reuse regression
         run: python scripts/reference_regression.py
+      - name: Disabled backend contract regression
+        run: python scripts/regression_backend_contracts.py
       - name: Gallery compatibility regression
         run: python scripts/regression_gallery_compat.py
       - name: Apply Alembic migrations

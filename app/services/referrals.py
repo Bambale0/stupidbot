@@ -136,6 +136,13 @@ async def build_ref_link(bot: Bot | None, partner_code: str | None) -> str | Non
     return f"https://t.me/{username}?start=ref_{partner_code}"
 
 
+async def disabled_increment_feed_share(session: AsyncSession, task_id: int) -> None:
+    """Keep stale clients harmless without maintaining an artificial share counter."""
+
+    del session, task_id
+    return None
+
+
 def install_repository_patches() -> None:
     """Install financial/referral implementations before plugins import repository symbols."""
     from app import repositories
@@ -160,6 +167,7 @@ def install_repository_patches() -> None:
         "apply_package_to_user": apply_package_to_user,
         "package_is_user_visible": package_is_user_visible,
         "refund_task_credits": refund_task_credits,
+        "increment_feed_share": disabled_increment_feed_share,
     }
     for name, implementation in patches.items():
         setattr(repositories, name, implementation)
