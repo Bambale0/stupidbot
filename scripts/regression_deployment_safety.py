@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+
+if __package__ in {None, ""}:
+    from _bootstrap import add_project_root_to_path
+
+    add_project_root_to_path()
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -51,6 +57,19 @@ def check_rollout() -> None:
     assert status_index < success_index, "rollback must stay armed through service status verification"
 
 
+def check_http_readiness_contract() -> None:
+    bot_source = _read("app/bot.py")
+    readiness_source = _read("app/readiness.py")
+    public_smoke = _read("scripts/staging_issue3_public_smoke.py")
+    assert "install_http_readiness_route()" in bot_source
+    assert '"/ready"' in readiness_source
+    assert "request.app.state.engine" in readiness_source
+    assert "request.app.state.redis" in readiness_source
+    assert "request.app.state.tracker" in readiness_source
+    assert 'client.get("/ready")' in public_smoke
+    assert '"tracker": "ok"' in public_smoke
+
+
 def check_default_ci() -> None:
     script = _read("scripts/ci.sh")
     assert "set -euo pipefail" in script
@@ -60,5 +79,9 @@ def check_default_ci() -> None:
 if __name__ == "__main__":
     check_financial_workflow()
     check_rollout()
+    check_http_readiness_contract()
     check_default_ci()
+    from scripts.regression_http_readiness import amain as readiness_regression
+
+    asyncio.run(readiness_regression())
     print("Deployment safety regression passed")

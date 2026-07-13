@@ -27,6 +27,14 @@ async def amain() -> None:
         health.raise_for_status()
         assert health.json() == {"status": "ok"}
 
+        ready = await client.get("/ready")
+        ready.raise_for_status()
+        ready_payload = ready.json()
+        assert ready_payload == {
+            "status": "ready",
+            "checks": {"database": "ok", "redis": "ok", "tracker": "ok"},
+        }
+
         miniapp = await client.get(f"{miniapp_path}/")
         miniapp.raise_for_status()
         assert "runtime-sync.js" in miniapp.text
@@ -50,7 +58,9 @@ async def amain() -> None:
             assert float(package.get("price_rub") or 0) >= 0
             assert not bool(package.get("is_unlimited"))
 
-    print("staging public smoke passed: health, Mini App runtime and backend packages")
+    print(
+        "staging public smoke passed: liveness, readiness, Mini App runtime and backend packages"
+    )
 
 
 if __name__ == "__main__":
