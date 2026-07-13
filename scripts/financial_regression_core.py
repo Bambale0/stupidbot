@@ -21,6 +21,7 @@ async def run_core(session: AsyncSession, suffix: str) -> dict[str, object]:
     refund_user = User(telegram_id=int(f"73{suffix}", 16))
     session.add_all([referrer, buyer, refund_user])
     await session.flush()
+    await session.refresh(buyer)
     assert buyer.partner_code == partner_code_for_telegram_id(buyer.telegram_id)
     buyer.referred_by_user_id = referrer.id
 
