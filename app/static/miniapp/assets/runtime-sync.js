@@ -29,14 +29,45 @@ function stripStaticPrice(text) {
     .trim();
 }
 
+function patchLiteModelUi() {
+  document.querySelectorAll('[data-model="nano-banana"]').forEach((button) => {
+    const title = button.querySelector("span");
+    const details = button.querySelector("small");
+    if (title) title.textContent = "Nano Banana 2 Lite · 1K";
+    if (details) details.textContent = "1K · до 10 фото-референсов";
+  });
+
+  let liteSelected = false;
+  document.querySelectorAll(".select-button span").forEach((element) => {
+    const text = element.textContent || "";
+    if (/^⚙\s*(?:banana\s*·\s*2k\/4k|nano banana 2 lite)/i.test(text)) {
+      liteSelected = true;
+      element.textContent = "⚙ Nano Banana 2 Lite · 1K";
+    }
+  });
+  if (liteSelected) {
+    document.querySelectorAll(".handoff-card small").forEach((element) => {
+      element.textContent = String(element.textContent || "").replace(
+        /(?:1 фото-референс|до 1 фото-референсов)/i,
+        "до 10 фото-референсов",
+      );
+    });
+  }
+}
+
 function patchRuntimeUi() {
   document.querySelectorAll(".custom-credit-panel").forEach((element) => element.remove());
   document.querySelectorAll(".tariff-card").forEach((element) => {
     if (/безлимит/i.test(element.textContent || "")) element.remove();
   });
+  document.querySelectorAll('[data-action="subscription"]').forEach((button) => {
+    button.closest(".info-card")?.remove();
+  });
+  patchLiteModelUi();
   const balanceButton = document.querySelector(".balance-pill");
   if (balanceButton) balanceButton.textContent = "Пополнить";
   document.querySelectorAll(".model-option small").forEach((element) => {
+    if (element.closest('[data-model="nano-banana"]')) return;
     const clean = stripStaticPrice(element.textContent);
     element.textContent = clean || "Цена подтвердится в Telegram";
   });

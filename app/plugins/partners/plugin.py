@@ -15,6 +15,7 @@ from app.db import session_scope
 from app.models import AffiliateWithdrawal, PartnerLink, User
 from app.plugins.common import ensure_user_for_callback, ensure_user_for_message, is_admin_user
 from app.repositories import ensure_partner_code, get_enabled_partner_links
+from app.services.financial_credits import grant_affiliate_balance
 from app.services.referrals import build_ref_link
 from app.ui import ACCOUNT_MENU_CALLBACK, add_navigation_buttons, navigation_keyboard
 
@@ -183,16 +184,24 @@ async def withdrawal_reject(callback: CallbackQuery, context: AppContext) -> Non
         withdrawal.status = "rejected"
         amount = withdrawal.amount_kopecks
         notify_chat_id = None
+        restored = 0
         if user:
-            user.affiliate_balance_kopecks += amount
+            restored = grant_affiliate_balance(user, amount)
             notify_chat_id = user.telegram_id
     if context.bot and notify_chat_id:
         with suppress(Exception):
+            debt_settled = max(0, amount - restored)
+            note = (
+                f"\nИз суммы {debt_settled / 100:.0f} ₽ погасило партнёрский долг."
+                if debt_settled
+                else ""
+            )
             await context.bot.send_message(
                 notify_chat_id,
-                "Заявка отклонена. Средства возвращены на партнёрский баланс.",
+                "Заявка отклонена. Доступная сумма возвращена на партнёрский баланс."
+                f"{note}",
             )
-    await callback.answer("Средства возвращены", show_alert=True)
+    await callback.answer("Возврат обработан", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("partner:open:"))

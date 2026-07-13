@@ -7,7 +7,11 @@ if __package__ in {None, ""}:
 
     add_project_root_to_path()
 
-from scripts.current_policy_regression_adapter import amain
+from scripts import current_policy_regression_adapter as adapter
+from scripts.current_model_policy_patch import install
+
+install(adapter)
+amain = adapter.amain
 
 
 if __name__ == "__main__":
