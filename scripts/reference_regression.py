@@ -7,12 +7,13 @@ if __package__ in {None, ""}:
 
 from app.config import Settings
 from app.models import GenerationTask
-from app.plugins.generation.plugin import _repeat_image_state_payload
+from app.plugins.generation.plugin import _image_settings_keyboard, _repeat_image_state_payload
 from app.plugins.references.plugin import (
     _callback_task_id,
     collect_reference_tasks,
     preserve_reference_origin,
     reference_signature,
+    submit_image_from_settings,
 )
 
 
@@ -49,6 +50,15 @@ def _image_task(
     return task
 
 
+def _keyboard_callbacks(markup) -> list[str]:
+    return [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+
+
 def main() -> None:
     original = _image_task(101, file_ids=["ref-a", "ref-b"])
     duplicate = _image_task(102, file_ids=["ref-a", "ref-b"], prompt="another prompt")
@@ -71,6 +81,10 @@ def main() -> None:
         "ref-b",
     ]
     assert reference_signature(original) == ("ref-a", "ref-b")
+
+    keyboard_payload = {**payload, "image_limits": {"max_images": 14}}
+    assert "image:submit" in _keyboard_callbacks(_image_settings_keyboard(keyboard_payload))
+    assert callable(submit_image_from_settings)
 
     saved = collect_reference_tasks([original, duplicate, video, unique], limit=10)
     assert [task.id for task in saved] == [101, 103]
