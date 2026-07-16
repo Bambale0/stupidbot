@@ -61,13 +61,53 @@ async def like_feed_card(callback: CallbackQuery, context: AppContext) -> None:
     user = await ensure_user_for_callback(callback, context)
     task_id = _callback_int(callback.data, "feed:like:", default=0)
     async with session_scope(context.session_factory) as session:
-        likes, is_new = await like_feed_task(session, task_id=task_id, user_id=user.id)
+        likes, active = await like_feed_task(session, task_id=task_id, user_id=user.id)
     if likes is None:
         await callback.answer("Работа уже недоступна", show_alert=True)
         return
-    await callback.answer("Лайк добавлен" if is_new else "Вы уже лайкали эту работу")
+    await callback.answer("Лайк добавлен" if active else "Лайк снят")
     if callback.message:
         await _refresh_feed_card(callback.message, context, viewer_user_id=user.id, task_id=task_id)
+
+
+@router.callback_query(F.data.startswith("feed:dislike:"))
+async def dislike_feed_card(callback: CallbackQuery, context: AppContext) -> None:
+    user = await ensure_user_for_callback(callback, context)
+    task_id = _callback_int(callback.data, "feed:dislike:", default=0)
+    async with session_scope(context.session_factory) as session:
+        dislikes, active = await like_feed_task(session, task_id=-task_id, user_id=user.id)
+    if dislikes is None:
+        await callback.answer("Работа уже недоступна", show_alert=True)
+        return
+    await callback.answer("Дизлайк добавлен" if active else "Дизлайк снят")
+    if callback.message:
+        await _refresh_feed_card(callback.message, context, viewer_user_id=user.id, task_id=task_id)
+
+
+@router.callback_query(F.data.startswith("feed:profile:"))
+async def feed_author_profile(callback: CallbackQuery, context: AppContext) -> None:
+    await ensure_user_for_callback(callback, context)
+    task_id = _callback_int(callback.data, "feed:profile:", default=0)
+    async with session_scope(context.session_factory) as session:
+        task = await get_public_feed_task(session, task_id)
+        row = await serialize_feed_task(session, task) if task else None
+    if not row:
+        await callback.answer("Профиль уже недоступен", show_alert=True)
+        return
+    profile = dict(row.get("author_profile") or {})
+    text = (
+        f"<b>{escape(str(profile.get('name') or row.get('author') or 'BANANA user'))}</b>\n\n"
+        f"Публичных работ: <b>{int(profile.get('works') or 0)}</b>\n"
+        f"Получено лайков: <b>{int(profile.get('likes') or 0)}</b>\n"
+        f"Дизлайков: <b>{int(profile.get('dislikes') or 0)}</b>\n\n"
+        "Откройте Mini App, чтобы посмотреть визуальную галерею автора."
+    )
+    if callback.message:
+        await callback.message.answer(
+            text,
+            reply_markup=navigation_keyboard(back_callback="menu:feed"),
+        )
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("feed:share:"))
@@ -117,7 +157,10 @@ async def remove_feed_card(callback: CallbackQuery, context: AppContext) -> None
     task_id = _callback_int(callback.data, "feed:remove:", default=0)
     async with session_scope(context.session_factory) as session:
         removed = await remove_task_from_feed(session, task_id=task_id, user_id=user.id)
-    await callback.answer("Работа снята с ленты" if removed else "Не получилось снять работу", show_alert=not removed)
+    await callback.answer(
+        "Работа снята с ленты" if removed else "Не получилось снять работу",
+        show_alert=not removed,
+    )
 
 
 @router.callback_query(F.data.startswith("feed:repeat:"))
@@ -214,7 +257,13 @@ async def _deliver_feed_card(
     async with session_scope(context.session_factory) as session:
         row = await serialize_feed_task(session, task)
     caption = _feed_caption(row)
-    keyboard = _feed_keyboard(task, viewer_user_id=viewer_user_id, index=index, total=total)
+    keyboard = _feed_keyboard(
+        task,
+        viewer_user_id=viewer_user_id,
+        index=index,
+        total=total,
+        dislikes=int(row.get("dislikes") or 0),
+    )
     media_url = str(task.result_urls[0]) if task.result_urls else ""
     with suppress(Exception):
         if generation_media_type(task) == "video":
@@ -228,19 +277,35 @@ async def _deliver_feed_card(
 def _feed_caption(row: dict) -> str:
     model = escape(str(row.get("model_code") or "model"))
     author = escape(str(row.get("author") or "Пользователь BANANA"))
+    profile = dict(row.get("author_profile") or {})
     return (
         "<b>Лента BANANA</b>\n"
         f"{author} · {model}\n"
-        f"Нравится: <b>{int(row.get('likes') or 0)}</b>\n\n"
+        f"❤️ <b>{int(row.get('likes') or 0)}</b> · "
+        f"👎 <b>{int(row.get('dislikes') or 0)}</b> · "
+        f"работ автора <b>{int(profile.get('works') or 0)}</b>\n\n"
         "«Повторить» создаст вашу версию с теми же настройками."
     )
 
 
 def _feed_keyboard(
-    task: GenerationTask, *, viewer_user_id: int, index: int, total: int
+    task: GenerationTask,
+    *,
+    viewer_user_id: int,
+    index: int,
+    total: int,
+    dislikes: int = 0,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=f"Нравится · {int(task.likes_count or 0)}", callback_data=f"feed:like:{task.id}")
+    builder.button(
+        text=f"❤️ {int(task.likes_count or 0)}",
+        callback_data=f"feed:like:{task.id}",
+    )
+    builder.button(
+        text=f"👎 {int(dislikes or 0)}",
+        callback_data=f"feed:dislike:{task.id}",
+    )
+    builder.button(text="Автор", callback_data=f"feed:profile:{task.id}")
     repeat_text = "Повторить видео" if generation_media_type(task) == "video" else "Повторить фото"
     builder.button(text=repeat_text, callback_data=f"feed:repeat:{task.id}")
     if total > 1:
@@ -248,7 +313,7 @@ def _feed_keyboard(
     if task.user_id == viewer_user_id:
         builder.button(text="Убрать из ленты", callback_data=f"feed:remove:{task.id}")
     builder.button(text="Главная", callback_data="menu:main")
-    rows = [2]
+    rows = [2, 2]
     if total > 1:
         rows.append(1)
     if task.user_id == viewer_user_id:
