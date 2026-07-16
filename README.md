@@ -56,14 +56,19 @@ python -m scripts.init_db
 - `KIE_UPLOAD_BASE_URL`
 - model-specific Comet/KIE variables из `.env.example`
 
-### Платежи
+### Платежи и гибридная экономика
 
 - `TBANK_TERMINAL_KEY`
 - `TBANK_PASSWORD`
 - `TBANK_SUCCESS_URL`
 - `TBANK_FAIL_URL`
 
-Произвольная продажа универсальных кредитов и продажа безлимита отключены current policy. Не включайте их обходом UI: серверная финансовая логика и regressions рассчитаны на отключенное состояние.
+Пользователь может одновременно использовать два способа оплаты:
+
+- купить платную подписку на ограниченный срок; повторная покупка продлевает действующую подписку;
+- отдельно покупать фиксированные пакеты фото-, видео- или универсальных кредитов.
+
+Подписка и кредитные балансы хранятся независимо: покупка подписки не стирает кредиты, а покупка кредитов не меняет срок подписки. Стандартная подписка оплачивается разово и не имеет автопродления. Произвольная покупка пользовательского количества универсальных кредитов отключена; доступны только настроенные администратором пакеты.
 
 ## Запуск
 
@@ -91,6 +96,16 @@ journalctl -u stupidbot --since "5 minutes ago" --no-pager
 - Повтор собственной генерации восстанавливает фото, модель, промпт, формат и качество.
 - Перед повторным запуском заново проверяются доступность модели, лимит фото, актуальная цена и баланс.
 - Повтор публичной работы не копирует чужой результат и требует собственный референс.
+- Две приветственные попытки применяются только к фото; видео всегда требует платную подписку либо достаточный видео/универсальный баланс.
+- В разделе пополнения одновременно показываются подписка и отдельные пакеты кредитов.
+
+## Админ-панель
+
+Администратор может управлять пользователями, балансами, подписками, тарифами, моделями, платежами, рефералами, выводами, галереей, настройками и рассылками.
+
+Финансовые действия выполняются идемпотентно: повторное подтверждение уже оплаченного платежа не зачисляет кредиты повторно и не продлевает подписку второй раз. Ручное подтверждение разрешено только для платежей со статусом `manual_pending`.
+
+Рассылка запускается фоновой задачей и не удерживает Telegram webhook. Получатели читаются из PostgreSQL ограниченными пачками, заблокированные пользователи исключаются, а прогресс `sent_count`/`fail_count` сохраняется после каждой пачки. При остановке процесса незавершённая рассылка получает статус `interrupted` и не перезапускается автоматически, чтобы не отправлять сообщения повторно части аудитории.
 
 ## Проверки
 
@@ -117,6 +132,12 @@ Workflow `.github/workflows/financial-integrity.yml` запускается дл
 - PostgreSQL 16 и Redis 7 readiness;
 - Alembic migrations;
 - reusable reference flow;
+- гибридную экономику подписки и кредитных пакетов;
+- активацию, продление и сторно подписки;
+- ручные админские подтверждения платежей и их идемпотентность;
+- пакетную неблокирующую рассылку и исключение заблокированных пользователей;
+- привязку реферала, aliases, self/cycle/rebind/blocked guards;
+- комиссии за кредитные пакеты и подписки, повторную обработку, выводы и сторно;
 - financial ledger/reversal/idempotency regressions;
 - broad current-policy regression;
 - transactional DB smoke;
@@ -184,12 +205,14 @@ app/
     references/             personal repeat and saved Telegram file_id sets
     feed/                   public feed
     gallery/                legacy-compatible feed alias
-    payments/               packages and payment UX
+    payments/               packages, subscriptions and payment UX
     partners/               referrals and withdrawals
     admin/                  operations and configuration
     finance/                financial analytics
     ux/                     production navigation contracts
   services/
+    admin_hardening.py      bounded background broadcasts and recovery
+    billing_catalog.py      hybrid subscription/credit catalog
     comet.py
     kie.py
     tbank.py
@@ -199,6 +222,8 @@ scripts/
   ci.sh
   runtime_readiness.py
   reference_regression.py
+  regression_admin_operations.py
+  regression_billing_referrals.py
   regression_deployment_safety.py
   regression_bot_ux.py
   regression_financial.py
