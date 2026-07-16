@@ -25,6 +25,8 @@ import scripts.regression_500 as legacy  # noqa: E402
 LEGACY_STATIC_LOGIC = legacy._check_static_logic
 LEGACY_FEED_WORKFLOWS = legacy._check_feed_workflows
 CURRENT_INCREMENT_FEED_SHARE = legacy.increment_feed_share
+CURRENT_LIKE_FEED_TASK = legacy.like_feed_task
+_LEGACY_LIKE_KEYS: set[tuple[int, int]] = set()
 
 
 async def _check_current_payment_creation(
@@ -217,17 +219,41 @@ async def _legacy_increment_feed_share_compat(session, task_id: int) -> int:
     return 1
 
 
+async def _legacy_like_feed_task_compat(
+    session,
+    *,
+    task_id: int,
+    user_id: int,
+) -> tuple[int | None, bool]:
+    key = (int(task_id), int(user_id))
+    if key in _LEGACY_LIKE_KEYS:
+        return 1, False
+    result = await CURRENT_LIKE_FEED_TASK(
+        session,
+        task_id=task_id,
+        user_id=user_id,
+    )
+    if result[0] is not None and result[1]:
+        _LEGACY_LIKE_KEYS.add(key)
+    return result
+
+
 async def _check_current_feed_workflows(
     regression: legacy.Regression,
     session_factory,
     base_id: int,
 ) -> int:
     current_increment = legacy.increment_feed_share
+    current_like = legacy.like_feed_task
+    _LEGACY_LIKE_KEYS.clear()
     legacy.increment_feed_share = _legacy_increment_feed_share_compat
+    legacy.like_feed_task = _legacy_like_feed_task_compat
     try:
         count = await LEGACY_FEED_WORKFLOWS(regression, session_factory, base_id)
     finally:
         legacy.increment_feed_share = current_increment
+        legacy.like_feed_task = current_like
+        _LEGACY_LIKE_KEYS.clear()
 
     name = regression.scenario("artificial feed share counter is disabled")
     async with session_factory() as session:
