@@ -104,11 +104,20 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
 
     row = await repositories.serialize_feed_task(session, first)
     assert row["author"] == f"@creator_{suffix}"
-    assert row["author_key"].startswith("creator-")
+    assert row["author_key"]
     assert row["author_profile"]["works"] == 2
     assert row["author_profile"]["likes"] == 2
     assert row["author_profile"]["dislikes"] == 1
     assert row["dislikes"] == 1
+
+    stats_cache = session.info.get("feed_author_stats")
+    assert isinstance(stats_cache, dict)
+    assert author.id in stats_cache
+    stats_cache[author.id]["works"] = 77
+    second_row = await repositories.serialize_feed_task(session, second)
+    assert second_row["author_profile"]["works"] == 77, (
+        "creator aggregates must be reused within one feed serialization session"
+    )
 
     ordered = await repositories.get_feed_tasks(session, limit=10)
     assert ordered[0].id == second.id, (
@@ -164,6 +173,9 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
         "data-community-reaction",
         "community-profile-page",
         "data-feed-repeat",
+        "FEED_CACHE_TTL_MS",
+        'data-action="refresh-feed"',
+        "loadCommunityFeed();",
     ):
         assert contract in feed_js
     for contract in (

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, UniqueConstraint, delete, func, select
+from sqlalchemy import ForeignKey, Index, UniqueConstraint, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -160,6 +160,11 @@ async def toggle_feed_reaction(
 
 
 async def _author_feed_stats(session: AsyncSession, user_id: int) -> dict[str, int]:
+    cache = session.info.setdefault("feed_author_stats", {})
+    cached = cache.get(int(user_id))
+    if isinstance(cached, dict):
+        return dict(cached)
+
     works = await session.scalar(
         select(func.count(GenerationTask.id)).where(
             GenerationTask.user_id == user_id,
@@ -180,11 +185,13 @@ async def _author_feed_stats(session: AsyncSession, user_id: int) -> dict[str, i
             *_public_feed_conditions(),
         )
     )
-    return {
+    stats = {
         "works": int(works or 0),
         "likes": int(likes or 0),
         "dislikes": int(dislikes or 0),
     }
+    cache[int(user_id)] = dict(stats)
+    return stats
 
 
 def _public_user_name(user: User | None) -> str:
