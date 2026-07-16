@@ -9,8 +9,10 @@ if __package__ in {None, ""}:
 
 from scripts import current_policy_regression_adapter as adapter
 from scripts.current_model_policy_patch import install
+from scripts.private_feed_policy_patch import install as install_private_feed_policy
 
 install(adapter)
+install_private_feed_policy(adapter)
 amain = adapter.amain
 
 
