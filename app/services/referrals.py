@@ -147,6 +147,7 @@ def install_repository_patches() -> None:
     """Install financial/referral implementations before plugins import repository symbols."""
     from app import repositories
     from app.services.billing_catalog import install_billing_catalog_patches
+    from app.services.feed_social import install_feed_social_patch
     from app.services.financial_integrity import (
         apply_affiliate_commission,
         apply_package_snapshot_to_user,
@@ -170,6 +171,8 @@ def install_repository_patches() -> None:
     }
     for name, implementation in patches.items():
         setattr(repositories, name, implementation)
+
+    install_feed_social_patch(repositories)
 
     from app.services.financial_payment_patch import install_payment_patches
     from app.services.financial_tracker_patch import install_tracker_patches

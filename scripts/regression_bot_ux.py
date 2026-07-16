@@ -156,7 +156,9 @@ def _check_admin_information_architecture() -> None:
     assert tuple(zip(_texts(home)[:-1], _callbacks(home)[:-1])) == ux_plugin.ADMIN_HOME_BUTTONS
     assert _texts(home)[-1] == "Главная"
     assert _callbacks(home)[-1] == "menu:main"
-    assert len(_buttons(home)) == 9
+    assert len(_buttons(home)) == 10
+    assert "Добавить тариф" in _texts(home)
+    assert "admin:tariff:add" in _callbacks(home)
     assert "Финансы" not in _texts(home)
     assert "Начислить" not in _texts(home)
     assert "Бан / Разбан" not in _texts(home)
@@ -169,8 +171,8 @@ def _check_admin_information_architecture() -> None:
         ),
         "admin:ux:catalog": (
             "Каталог",
-            ("Модели и цены", "Пакеты", "Публичные работы"),
-            ("admin:models", "admin:packages", "admin:gallery"),
+            ("Добавить тариф", "Тарифы и подписки", "Модели и цены", "Публичные работы"),
+            ("admin:tariff:add", "admin:packages", "admin:models", "admin:gallery"),
         ),
         "admin:ux:affiliate": (
             "Партнёрка",
@@ -199,7 +201,7 @@ def _check_admin_information_architecture() -> None:
         assert tuple(callback for _, callback in items) == expected_callbacks
         markup = ux_plugin._section_keyboard(items)
         _assert_unique_buttons(markup, screen=route)
-        assert len(_buttons(markup)) <= 5
+        assert len(_buttons(markup)) <= 6
         assert _callbacks(markup)[-2:] == ["admin:menu", "menu:main"]
         leaf_callbacks.extend(expected_callbacks)
 
@@ -218,6 +220,8 @@ def _check_source_contracts() -> None:
 
     assert "increment_feed_share" not in feed_source
     assert 'text=f"Share' not in feed_source
+    assert 'F.data.startswith("feed:dislike:")' in feed_source
+    assert 'F.data.startswith("feed:profile:")' in feed_source
     assert "Галерея объединена с лентой" in gallery_source
     assert 'F.data.in_({"menu:account", "menu:more"})' in core_source
     assert "_install_admin_finance_button" not in finance_source
