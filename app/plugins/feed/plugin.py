@@ -115,7 +115,7 @@ async def legacy_share_feed_card(callback: CallbackQuery, context: AppContext) -
     """Keep stale keyboards safe without incrementing a fake share counter."""
 
     await ensure_user_for_callback(callback, context)
-    await callback.answer("Поделиться можно через стандартную кнопку Telegram", show_alert=True)
+    await callback.answer("Используйте кнопку «Ссылка на пост»", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("feed:publish:confirm:"))
@@ -146,8 +146,10 @@ async def publish_task(callback: CallbackQuery, context: AppContext) -> None:
     }
     await callback.answer(texts.get(reason, "Не получилось опубликовать"), show_alert=not ok)
     if callback.message and ok:
+        post_url = _feed_post_url(context, task_id)
         await callback.message.answer(
-            "Работа в ленте.", reply_markup=navigation_keyboard(back_callback="menu:feed")
+            f"Работа опубликована.\n\nСсылка на пост:\n{escape(post_url)}",
+            reply_markup=navigation_keyboard(back_callback="menu:feed"),
         )
 
 
@@ -180,23 +182,27 @@ async def repeat_feed_card(callback: CallbackQuery, context: AppContext, state: 
         await state.set_state(MotionFlow.image)
         await state.update_data(
             model_code=task.model_code,
-            prompt=task.prompt or "",
             duration=str(payload.get("duration") or "5"),
             mode=str(payload.get("mode") or "pro"),
             source_feed_task_id=task.id,
         )
-        text = "Настройки сохранены. Отправьте изображение для своей версии видео."
+        text = (
+            "Модель и параметры сохранены. Промпт автора скрыт. "
+            "Отправьте изображение, затем напишите собственный промпт для видео."
+        )
         back = "menu:motion"
     else:
         await state.set_state(ImageFlow.reference_prompt)
         await state.update_data(
             model_code=task.model_code,
-            prompt=task.prompt or "",
             aspect_ratio=payload.get("aspect_ratio") or DEFAULT_IMAGE_ASPECT_RATIO,
             resolution=payload.get("resolution") or "2K",
             source_feed_task_id=task.id,
         )
-        text = "Настройки сохранены. Отправьте фото для своей версии изображения."
+        text = (
+            "Модель и формат сохранены. Промпт автора скрыт. "
+            "Отправьте своё фото, затем напишите собственный промпт."
+        )
         back = "menu:image"
 
     if callback.message:
@@ -263,6 +269,7 @@ async def _deliver_feed_card(
         index=index,
         total=total,
         dislikes=int(row.get("dislikes") or 0),
+        post_url=_feed_post_url(context, task.id),
     )
     media_url = str(task.result_urls[0]) if task.result_urls else ""
     with suppress(Exception):
@@ -284,7 +291,8 @@ def _feed_caption(row: dict) -> str:
         f"❤️ <b>{int(row.get('likes') or 0)}</b> · "
         f"👎 <b>{int(row.get('dislikes') or 0)}</b> · "
         f"работ автора <b>{int(profile.get('works') or 0)}</b>\n\n"
-        "«Повторить» создаст вашу версию с теми же настройками."
+        "🔒 Промпт автора скрыт. «Создать своё» перенесёт только модель и формат — "
+        "текст нужно написать самостоятельно."
     )
 
 
@@ -295,6 +303,7 @@ def _feed_keyboard(
     index: int,
     total: int,
     dislikes: int = 0,
+    post_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -306,14 +315,17 @@ def _feed_keyboard(
         callback_data=f"feed:dislike:{task.id}",
     )
     builder.button(text="Автор", callback_data=f"feed:profile:{task.id}")
-    repeat_text = "Повторить видео" if generation_media_type(task) == "video" else "Повторить фото"
-    builder.button(text=repeat_text, callback_data=f"feed:repeat:{task.id}")
+    builder.button(text="Создать своё", callback_data=f"feed:repeat:{task.id}")
+    if post_url:
+        builder.button(text="Ссылка на пост", url=post_url)
     if total > 1:
         builder.button(text="Следующая", callback_data=f"feed:next:{index + 1}")
     if task.user_id == viewer_user_id:
         builder.button(text="Убрать из ленты", callback_data=f"feed:remove:{task.id}")
     builder.button(text="Главная", callback_data="menu:main")
     rows = [2, 2]
+    if post_url:
+        rows.append(1)
     if total > 1:
         rows.append(1)
     if task.user_id == viewer_user_id:
@@ -321,6 +333,10 @@ def _feed_keyboard(
     rows.append(1)
     builder.adjust(*rows)
     return builder.as_markup()
+
+
+def _feed_post_url(context: AppContext, task_id: int) -> str:
+    return f"{context.settings.mini_app_url}?post={int(task_id)}"
 
 
 def _publish_confirm_keyboard(task_id: int) -> InlineKeyboardMarkup:

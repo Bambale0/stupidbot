@@ -223,7 +223,6 @@ async def serialize_social_feed_task(
         or "video" in task.model_code
         or str(payload.get("provider") or "") == "kie-video"
         else "image",
-        "prompt": task.prompt or "",
         "model_code": task.model_code,
         "author": author,
         "author_key": author_key,
