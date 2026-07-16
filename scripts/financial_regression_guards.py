@@ -145,15 +145,25 @@ async def run_guards(
     else:
         raise AssertionError("negative model price was accepted")
 
-    unlimited = CreditPackage(
-        code=f"unlimited-{suffix}",
-        title="Unlimited",
+    subscription = CreditPackage(
+        code=f"subscription-{suffix}",
+        title="Subscription",
         price_rub=100,
         is_unlimited=True,
         duration_days=30,
         is_enabled=True,
     )
-    assert not package_is_user_visible(unlimited)
+    assert package_is_user_visible(subscription)
+
+    malformed_subscription = CreditPackage(
+        code=f"subscription-invalid-{suffix}",
+        title="Invalid subscription",
+        price_rub=100,
+        is_unlimited=True,
+        duration_days=0,
+        is_enabled=True,
+    )
+    assert not package_is_user_visible(malformed_subscription)
 
     assert int(
         await session.scalar(select(func.count()).select_from(CreditLedgerEntry)) or 0
