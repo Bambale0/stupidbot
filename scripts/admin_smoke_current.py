@@ -209,18 +209,35 @@ async def _check_database_workflows() -> None:
                 assert ok, reason
                 feed_items = await get_feed_tasks(session, limit=5)
                 assert any(item.id == feed_task.id for item in feed_items)
-                likes, is_new = await like_feed_task(
+
+                likes, active = await like_feed_task(
                     session,
                     task_id=feed_task.id,
                     user_id=regular_user.id,
                 )
-                assert likes == 1 and is_new
-                likes, is_new = await like_feed_task(
+                assert likes == 1 and active
+
+                likes, active = await like_feed_task(
                     session,
                     task_id=feed_task.id,
                     user_id=regular_user.id,
                 )
-                assert likes == 1 and not is_new
+                assert likes == 0 and not active
+
+                dislikes, active = await like_feed_task(
+                    session,
+                    task_id=-feed_task.id,
+                    user_id=regular_user.id,
+                )
+                assert dislikes == 1 and active
+
+                likes, active = await like_feed_task(
+                    session,
+                    task_id=feed_task.id,
+                    user_id=regular_user.id,
+                )
+                assert likes == 1 and active, "like must replace the existing dislike"
+
                 assert await increment_feed_share(session, feed_task.id) is None
                 assert await remove_task_from_feed(
                     session,
