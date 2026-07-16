@@ -165,9 +165,8 @@ def options_keyboard(prefix: str, values: list[str], back: str | None = None) ->
 
 
 def packages_keyboard(packages: list[CreditPackage]) -> InlineKeyboardMarkup:
-    visible_packages = [package for package in packages if not package.is_unlimited]
     builder = InlineKeyboardBuilder()
-    for package in visible_packages:
+    for package in packages:
         price = f"{float(package.price_rub):.0f} ₽"
         amount = package_credits_text(package, short=True)
         builder.button(
@@ -175,7 +174,7 @@ def packages_keyboard(packages: list[CreditPackage]) -> InlineKeyboardMarkup:
             callback_data=f"pay:preview:{package.id}",
         )
     nav_count = add_navigation_buttons(builder, back_callback=ACCOUNT_MENU_CALLBACK)
-    rows = [1] * len(visible_packages)
+    rows = [1] * len(packages)
     rows.append(nav_count)
     builder.adjust(*rows)
     return builder.as_markup()
