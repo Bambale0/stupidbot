@@ -12,6 +12,7 @@ from app.models import GenerationModel, GenerationTask, UploadedFile
 from app.plugins.generation.plugin import _image_settings_keyboard, _repeat_image_state_payload
 from app.plugins.loader import normalized_plugin_names
 from app.plugins.references.plugin import (
+    REFERENCE_LIBRARY_LIMIT,
     _callback_index,
     _callback_task_id,
     _reference_library_caption,
@@ -127,25 +128,21 @@ def main() -> None:
         _uploaded_file(207, "upload-g"),
         _uploaded_file(208, "upload-a"),
     ]
-    library = collect_saved_references(uploads, [original, unique], limit=10)
+    assert REFERENCE_LIBRARY_LIMIT == 5
+    library = collect_saved_references(uploads, [original, unique])
     assert [item["telegram_file_id"] for item in library] == [
         "upload-a",
         "upload-b",
         "upload-c",
         "upload-d",
         "upload-e",
-        "upload-f",
-        "upload-g",
-        "ref-a",
-        "ref-b",
-        "ref-c",
     ]
-    assert len(collect_saved_references(uploads, [original], limit=5)) == 5
+    assert len(library) == REFERENCE_LIBRARY_LIMIT
     assert collect_saved_references(uploads, [original], limit=0) == []
 
     selected = ["upload-a", "upload-c"]
     caption = _reference_library_caption(library, selected, 1)
-    assert "Фото <b>2/10</b>" in caption
+    assert "Фото <b>2/5</b>" in caption
     assert "Выбрано: <b>2</b>" in caption
     assert "portrait" not in caption
     carousel_callbacks = _callbacks(
@@ -208,13 +205,15 @@ def main() -> None:
     assert 'F.data.startswith("image:again:")' in source
     assert 'F.data == "image:submit"' in source
     assert 'UploadedFile.user_id == user_id' in source
+    assert "REFERENCE_LIBRARY_LIMIT = 5" in source
+    assert "REFERENCE_LIBRARY_SCAN_LIMIT = 30" in source
     assert "InputMediaPhoto" in source
     assert "message.answer_photo" in source
     assert '"prompt": ""' in source
     assert "_reference_button_text" not in source
 
     asyncio.run(backend_contract_regression())
-    print("Reference photo carousel and backend contract regression passed")
+    print("Five-card reference carousel and backend contract regression passed")
 
 
 if __name__ == "__main__":
