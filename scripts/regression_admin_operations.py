@@ -6,9 +6,11 @@ from types import SimpleNamespace
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app import db as app_db
 from app.models import Broadcast, CreditPackage, Payment, User
 from app.plugins.admin import plugin as admin_plugin
 from app.services import admin_hardening
+from app.services.billing_catalog import _is_legacy_unlimited_disable
 
 
 class FakeBroadcastBot:
@@ -37,6 +39,11 @@ async def run_admin_operations_regression(
     session_factory: async_sessionmaker[AsyncSession],
     suffix: str,
 ) -> None:
+    assert not any(
+        _is_legacy_unlimited_disable(statement)
+        for statement in app_db.SCHEMA_COMPAT_SQL
+    ), "init_db must not disable valid paid subscriptions on every restart"
+
     admin = User(
         telegram_id=int(f"971{suffix}", 16),
         is_admin=True,
