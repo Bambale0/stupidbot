@@ -22,6 +22,7 @@ from scripts.financial_regression_guards import (  # noqa: E402
     run_guards,
 )
 from scripts.regression_billing_referrals import run_billing_referral_regression  # noqa: E402
+from scripts.regression_growth_rewards import run_growth_rewards_regression  # noqa: E402
 
 
 async def amain() -> None:
@@ -39,6 +40,7 @@ async def amain() -> None:
                 context = await run_core(session, suffix)
                 await run_guards(session, settings, suffix, context)
                 await run_billing_referral_regression(session, suffix)
+                await run_growth_rewards_regression(session, suffix)
         finally:
             await transaction.rollback()
     await engine.dispose()

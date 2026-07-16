@@ -177,8 +177,10 @@ def install_repository_patches() -> None:
 
     from app.services.financial_payment_patch import install_payment_patches
     from app.services.financial_tracker_patch import install_tracker_patches
+    from app.services.growth_rewards import install_growth_rewards_patch
     from app.services.nano_banana_lite import install_nano_banana_lite_patch
 
     install_payment_patches()
     install_tracker_patches()
     install_nano_banana_lite_patch()
+    install_growth_rewards_patch()
