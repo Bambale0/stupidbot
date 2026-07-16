@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app import db as app_db
+
 CREATOR_PHOTO_CREDITS = 50
 CREATOR_VIDEO_CREDITS = 20
 CREATOR_DESCRIPTION = (
@@ -11,10 +13,57 @@ CREATOR_DESCRIPTION = (
 ONE_TIME_TERMS = (
     "Разовая покупка без автопродления. Кредиты зачисляются после подтверждения оплаты."
 )
+SUBSCRIPTION_CODE = "unlimited_30"
+SUBSCRIPTION_TITLE = "Подписка на 30 дней"
+SUBSCRIPTION_DESCRIPTION = (
+    "Платная подписка с безлимитным доступом к включённым фото- и видео-моделям на 30 дней."
+)
+SUBSCRIPTION_TERMS = (
+    "Разовая оплата без автопродления. Подписка активируется после подтверждения оплаты "
+    "и действует 30 дней. Продлить её можно повторной покупкой."
+)
+
+
+def _is_legacy_unlimited_disable(statement: str) -> bool:
+    normalized = " ".join(str(statement).lower().split())
+    return (
+        "update credit_packages" in normalized
+        and "set is_enabled = false" in normalized
+        and "where is_unlimited = true" in normalized
+        and "duration_days" not in normalized
+    )
+
+
+# Older current-policy code disabled every unlimited package on every init_db call.
+# Hybrid billing replaces that policy, so remove the legacy mutation before schema
+# compatibility statements are executed. Invalid subscriptions are still hidden by
+# package_is_user_visible when they have no positive duration.
+app_db.SCHEMA_COMPAT_SQL = tuple(
+    statement
+    for statement in app_db.SCHEMA_COMPAT_SQL
+    if not _is_legacy_unlimited_disable(statement)
+)
+
+HYBRID_BILLING_COMPAT_SQL: tuple[str, ...] = (
+    f"""
+    UPDATE credit_packages
+    SET title = '{SUBSCRIPTION_TITLE}',
+        description = '{SUBSCRIPTION_DESCRIPTION}',
+        terms = '{SUBSCRIPTION_TERMS}',
+        is_enabled = TRUE,
+        is_unlimited = TRUE,
+        duration_days = 30
+    WHERE code = '{SUBSCRIPTION_CODE}'
+      AND title = 'Безлимит на 30 дней'
+    """,
+)
+
+if not any(SUBSCRIPTION_CODE in statement for statement in app_db.SCHEMA_COMPAT_SQL):
+    app_db.SCHEMA_COMPAT_SQL = (*app_db.SCHEMA_COMPAT_SQL, *HYBRID_BILLING_COMPAT_SQL)
 
 
 def install_billing_catalog_patches(repositories: Any) -> None:
-    """Normalize default one-time tariffs before repository seeding runs."""
+    """Normalize default hybrid tariffs before repository seeding runs."""
 
     if getattr(repositories, "_billing_catalog_patches_installed", False):
         return
@@ -33,8 +82,20 @@ def install_billing_catalog_patches(repositories: Any) -> None:
                     "video_credits": CREATOR_VIDEO_CREDITS,
                 }
             )
-        elif bool(package.get("is_unlimited")):
-            package["is_enabled"] = False
+        elif code == SUBSCRIPTION_CODE:
+            package.update(
+                {
+                    "title": SUBSCRIPTION_TITLE,
+                    "description": SUBSCRIPTION_DESCRIPTION,
+                    "terms": SUBSCRIPTION_TERMS,
+                    "credits": 0,
+                    "photo_credits": 0,
+                    "video_credits": 0,
+                    "is_unlimited": True,
+                    "duration_days": 30,
+                    "is_enabled": True,
+                }
+            )
 
     original_should_sync = repositories._should_sync_default_package_split
 

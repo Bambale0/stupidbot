@@ -57,9 +57,10 @@ async def _check_current_payment_creation(
             price_rub=Decimal("99.00"),
             is_enabled=True,
         )
-        unlimited_package = CreditPackage(
-            code=f"miniapp-unlimited-package-{base_id}",
-            title="Unlimited Mini App Package",
+        subscription_package = CreditPackage(
+            code=f"miniapp-subscription-package-{base_id}",
+            title="Mini App Subscription",
+            terms="Разовая оплата без автопродления.",
             price_rub=Decimal("299.00"),
             is_unlimited=True,
             duration_days=30,
@@ -78,7 +79,7 @@ async def _check_current_payment_creation(
                 package,
                 disabled_package,
                 empty_package,
-                unlimited_package,
+                subscription_package,
                 technical_package,
             ]
         )
@@ -88,7 +89,7 @@ async def _check_current_payment_creation(
             "package": package.id,
             "disabled": disabled_package.id,
             "empty": empty_package.id,
-            "unlimited": unlimited_package.id,
+            "subscription": subscription_package.id,
             "technical": technical_package.id,
         }
 
@@ -103,7 +104,7 @@ async def _check_current_payment_creation(
         dispatcher=None,
     )
 
-    name = regression.scenario("miniapp payment creation manual pending")
+    name = regression.scenario("miniapp credit package payment creation manual pending")
     result = await create_package_payment(
         context,
         user_id=ids["user"],
@@ -117,6 +118,26 @@ async def _check_current_payment_creation(
     regression.check(name, result.package_snapshot["package_id"] == ids["package"])
     async with session_factory() as session:
         payment = await session.get(Payment, result.payment_id)
+        regression.check(name, payment is not None)
+        if payment:
+            regression.check(name, payment.status == "manual_pending")
+            regression.check(name, dict(payment.raw_payload or {}).get("source") == "miniapp")
+
+    name = regression.scenario("miniapp subscription payment creation manual pending")
+    subscription_result = await create_package_payment(
+        context,
+        user_id=ids["user"],
+        package_id=ids["subscription"],
+        customer_key=str(base_id + 1),
+        source="miniapp",
+    )
+    regression.check(name, subscription_result.status == "manual_pending")
+    regression.check(name, subscription_result.payment_url is None)
+    regression.check(name, subscription_result.amount_kopecks == 29900)
+    regression.check(name, subscription_result.package_snapshot["is_unlimited"] is True)
+    regression.check(name, subscription_result.package_snapshot["duration_days"] == 30)
+    async with session_factory() as session:
+        payment = await session.get(Payment, subscription_result.payment_id)
         regression.check(name, payment is not None)
         if payment:
             regression.check(name, payment.status == "manual_pending")
@@ -139,7 +160,6 @@ async def _check_current_payment_creation(
     unavailable = [
         ("disabled package", ids["disabled"]),
         ("empty package", ids["empty"]),
-        ("unlimited package", ids["unlimited"]),
         ("technical package", ids["technical"]),
     ]
     for label, package_id in unavailable:
