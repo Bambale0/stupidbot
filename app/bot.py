@@ -14,6 +14,10 @@ from redis.asyncio import Redis
 from app.config import Settings
 from app.context import AppContext
 from app.readiness import install_http_readiness_route
+from app.services.admin_hardening import (
+    install_admin_hardening_patch,
+    shutdown_admin_background_tasks,
+)
 from app.services.financial_settings import validate_production_security
 from app.services.referrals import install_repository_patches
 
@@ -72,6 +76,10 @@ def create_bot(settings: Settings) -> Bot:
     return Bot(token=settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 
+async def _shutdown_admin_tasks(**_: Any) -> None:
+    await shutdown_admin_background_tasks()
+
+
 def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
     for required_plugin in ("feed", "finance"):
         if required_plugin not in context.settings.enabled_plugins:
@@ -86,6 +94,8 @@ def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
     dispatcher.callback_query.middleware(ActionLoggingMiddleware())
     dispatcher["context"] = context
     load_plugins(dispatcher, context)
+    install_admin_hardening_patch(context)
+    dispatcher.shutdown.register(_shutdown_admin_tasks)
     return dispatcher
 
 
