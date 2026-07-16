@@ -15,7 +15,7 @@ from app.context import AppContext
 from app.db import session_scope
 from app.models import CreditPackage, Payment
 from app.plugins.common import ensure_user_for_callback, ensure_user_for_message
-from app.repositories import list_packages
+from app.repositories import list_packages, package_is_user_visible
 from app.services.payments import (
     PackagePaymentInit,
     PaymentPackageUnavailable,
@@ -47,15 +47,13 @@ async def packages_callback(callback: CallbackQuery, context: AppContext, state:
 
 async def _send_packages(message: Message, context: AppContext, *, edit: bool = False) -> None:
     async with session_scope(context.session_factory) as session:
-        items = [
-            package
-            for package in await list_packages(session, only_enabled=True)
-            if not package.is_unlimited
-        ]
+        items = await list_packages(session, only_enabled=True)
     text = (
-        "<b>Пополнение</b>\n\nВыберите пакет. Перед оплатой покажу состав и условия."
+        "<b>Пополнение и подписка</b>\n\n"
+        "Можно оформить подписку или купить отдельный пакет кредитов. "
+        "Перед оплатой покажу состав и условия."
         if items
-        else "<b>Пополнение</b>\n\nПакеты временно недоступны."
+        else "<b>Пополнение и подписка</b>\n\nТарифы временно недоступны."
     )
     markup = packages_keyboard(items)
     if edit:
@@ -77,12 +75,12 @@ async def package_preview(callback: CallbackQuery, context: AppContext) -> None:
     await ensure_user_for_callback(callback, context)
     package_id = _package_id_from_callback(callback.data)
     if not package_id:
-        await callback.answer("Пакет недоступен", show_alert=True)
+        await callback.answer("Тариф недоступен", show_alert=True)
         return
     async with session_scope(context.session_factory) as session:
         package = await session.get(CreditPackage, package_id)
-    if not package or not package.is_enabled or package.is_unlimited:
-        await callback.answer("Пакет недоступен", show_alert=True)
+    if not package or not package_is_user_visible(package):
+        await callback.answer("Тариф недоступен", show_alert=True)
         return
     if callback.message:
         text = _package_preview_text(package)
@@ -101,7 +99,7 @@ async def package_payment_create(callback: CallbackQuery, context: AppContext) -
     user = await ensure_user_for_callback(callback, context)
     package_id = _callback_int(callback.data, "pay:create:")
     if not package_id:
-        await callback.answer("Пакет недоступен", show_alert=True)
+        await callback.answer("Тариф недоступен", show_alert=True)
         return
     await callback.answer("Создаю оплату...")
     try:
@@ -115,7 +113,7 @@ async def package_payment_create(callback: CallbackQuery, context: AppContext) -
     except PaymentPackageUnavailable:
         if callback.message:
             await callback.message.answer(
-                "Пакет больше недоступен. Выберите другой вариант.",
+                "Тариф больше недоступен. Выберите другой вариант.",
                 reply_markup=navigation_keyboard(back_callback="menu:packages"),
             )
         return
@@ -134,7 +132,7 @@ async def package_payment_create(callback: CallbackQuery, context: AppContext) -
 
 @router.callback_query(F.data == "pay:custom")
 async def custom_credits_disabled(callback: CallbackQuery) -> None:
-    await callback.answer("Выберите один из готовых пакетов.", show_alert=True)
+    await callback.answer("Выберите один из готовых пакетов кредитов.", show_alert=True)
 
 
 @router.message(F.text == "Оплаты")
@@ -172,7 +170,7 @@ def _package_preview_text(package: CreditPackage) -> str:
     description_text = f"\n\n{escape(description)}" if description else ""
     return (
         f"<b>{escape(package.title)}</b>\n\n"
-        f"В пакете: <b>{escape(package_credits_text(package))}</b>\n"
+        f"В тарифе: <b>{escape(package_credits_text(package))}</b>\n"
         f"Цена: <b>{_format_price(package.price_rub)}</b>"
         f"{description_text}\n\n"
         f"{escape(_package_terms_text(package))}"
@@ -182,14 +180,14 @@ def _package_preview_text(package: CreditPackage) -> str:
 async def _send_payment_result(message: Message, result: PackagePaymentInit) -> None:
     if result.status == "manual_pending":
         await message.answer(
-            "Заявка создана. После подтверждения администратором кредиты появятся на балансе.\n\n"
+            "Заявка создана. После подтверждения администратором доступ или кредиты появятся в профиле.\n\n"
             f"{_payment_result_text(result)}",
             reply_markup=navigation_keyboard(back_callback="menu:packages"),
         )
         return
     if result.payment_url:
         await message.answer(
-            f"{_payment_result_text(result)}\n\nПосле оплаты баланс обновится автоматически.",
+            f"{_payment_result_text(result)}\n\nПосле оплаты профиль обновится автоматически.",
             reply_markup=_payment_keyboard(result.payment_url),
         )
         return
@@ -202,7 +200,7 @@ async def _send_payment_result(message: Message, result: PackagePaymentInit) -> 
 def _payment_result_text(result: PackagePaymentInit) -> str:
     snapshot = result.package_snapshot
     return (
-        f"Пакет: <b>{escape(str(snapshot.get('title') or 'пакет'))}</b>\n"
+        f"Тариф: <b>{escape(str(snapshot.get('title') or 'тариф'))}</b>\n"
         f"Начисление: <b>{escape(_snapshot_amount_text(snapshot))}</b>\n"
         f"Сумма: <b>{_format_price_from_kopecks(result.amount_kopecks)}</b>"
     )
@@ -210,7 +208,11 @@ def _payment_result_text(result: PackagePaymentInit) -> str:
 
 def _package_terms_text(package: CreditPackage) -> str:
     terms = str(package.terms or "").strip()
-    return terms or "Кредиты зачисляются сразу после подтверждения оплаты."
+    if terms:
+        return terms
+    if package.is_unlimited:
+        return "Разовая оплата без автопродления. Срок доступа начинается после оплаты."
+    return "Кредиты зачисляются сразу после подтверждения оплаты."
 
 
 def _format_price(price_rub: object) -> str:
@@ -223,6 +225,9 @@ def _format_price_from_kopecks(amount_kopecks: int) -> str:
 
 def _snapshot_amount_text(snapshot: dict[str, object]) -> str:
     parts: list[str] = []
+    if bool(snapshot.get("is_unlimited")):
+        days = _snapshot_int(snapshot.get("duration_days"))
+        parts.append(f"подписка на {days} дней" if days else "подписка")
     photo_credits = _snapshot_int(snapshot.get("photo_credits"))
     video_credits = _snapshot_int(snapshot.get("video_credits"))
     common_credits = _snapshot_int(snapshot.get("credits"))

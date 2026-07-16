@@ -157,10 +157,6 @@ def install_repository_patches() -> None:
 
     install_billing_catalog_patches(repositories)
 
-    for package in repositories.DEFAULT_PACKAGES:
-        if bool(package.get("is_unlimited")):
-            package["is_enabled"] = False
-
     patches: dict[str, Any] = {
         "normalize_ref_code": normalize_ref_code,
         "ensure_partner_code": ensure_partner_code,

@@ -35,11 +35,17 @@ def normalize_credit_type(value: Any) -> str:
 
 
 def package_is_user_visible(package: CreditPackage) -> bool:
-    value = int(package.credits or 0) + int(package.photo_credits or 0) + int(package.video_credits or 0)
+    credits = (
+        int(package.credits or 0)
+        + int(package.photo_credits or 0)
+        + int(package.video_credits or 0)
+    )
+    subscription_days = positive_int(package.duration_days) if package.is_unlimited else 0
     technical = str(package.code or "").startswith("scenario-package-") or str(
         package.title or ""
     ).startswith("Scenario Package")
-    return bool(package.is_enabled) and value > 0 and not package.is_unlimited and not technical
+    grants_value = credits > 0 or subscription_days > 0
+    return bool(package.is_enabled) and grants_value and not technical
 
 
 def grant_credit(user: User, kind: str, amount: int) -> None:
