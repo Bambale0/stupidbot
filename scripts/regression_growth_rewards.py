@@ -20,7 +20,7 @@ from app.plugins.generation import plugin as generation
 
 
 async def run_growth_rewards_regression(session: AsyncSession, suffix: str) -> None:
-    newcomer = User(telegram_id=int(f"81{suffix}", 16))
+    newcomer = User(telegram_id=int(f"91{suffix}", 16))
     session.add(newcomer)
     await session.flush()
 
@@ -52,11 +52,11 @@ async def run_growth_rewards_regression(session: AsyncSession, suffix: str) -> N
     assert free_task.refunded_at is not None
 
     author = User(
-        telegram_id=int(f"82{suffix}", 16),
+        telegram_id=int(f"92{suffix}", 16),
         free_photo_generations_remaining=0,
     )
     repeater = User(
-        telegram_id=int(f"83{suffix}", 16),
+        telegram_id=int(f"93{suffix}", 16),
         free_photo_generations_remaining=0,
     )
     session.add_all([author, repeater])
