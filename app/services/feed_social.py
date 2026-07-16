@@ -52,7 +52,8 @@ def _public_feed_conditions() -> tuple[Any, ...]:
         GenerationTask.is_public_feed.is_(True),
         GenerationTask.feed_status == "approved",
         GenerationTask.status == "success",
-        func.jsonb_array_length(GenerationTask.result_urls) > 0,
+        GenerationTask.result_urls.is_not(None),
+        GenerationTask.result_urls != [],
     )
 
 
