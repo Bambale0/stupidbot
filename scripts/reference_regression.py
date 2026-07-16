@@ -8,12 +8,16 @@ if __package__ in {None, ""}:
 
     add_project_root_to_path()
 
-from app.models import GenerationModel, GenerationTask
+from app.models import GenerationModel, GenerationTask, UploadedFile
 from app.plugins.generation.plugin import _image_settings_keyboard, _repeat_image_state_payload
 from app.plugins.loader import normalized_plugin_names
 from app.plugins.references.plugin import (
+    _callback_index,
     _callback_task_id,
+    _reference_library_caption,
+    _reference_library_keyboard,
     collect_reference_tasks,
+    collect_saved_references,
     preserve_reference_origin,
     reference_signature,
     submit_image_from_settings,
@@ -53,6 +57,20 @@ def _image_task(
     )
     task.id = task_id
     return task
+
+
+def _uploaded_file(file_id: int, telegram_file_id: str) -> UploadedFile:
+    uploaded = UploadedFile(
+        user_id=1,
+        file_type="image",
+        telegram_file_id=telegram_file_id,
+        original_name=f"{telegram_file_id}.jpg",
+        mime_type="image/jpeg",
+        size_bytes=2048,
+        kie_file_url=f"telegram://{telegram_file_id}",
+    )
+    uploaded.id = file_id
+    return uploaded
 
 
 def _callbacks(markup) -> list[str]:
@@ -99,6 +117,48 @@ def main() -> None:
     assert [task.id for task in saved] == [101, 103]
     assert collect_reference_tasks([original], limit=0) == []
 
+    uploads = [
+        _uploaded_file(201, "upload-a"),
+        _uploaded_file(202, "upload-b"),
+        _uploaded_file(203, "upload-c"),
+        _uploaded_file(204, "upload-d"),
+        _uploaded_file(205, "upload-e"),
+        _uploaded_file(206, "upload-f"),
+        _uploaded_file(207, "upload-g"),
+        _uploaded_file(208, "upload-a"),
+    ]
+    library = collect_saved_references(uploads, [original, unique], limit=10)
+    assert [item["telegram_file_id"] for item in library] == [
+        "upload-a",
+        "upload-b",
+        "upload-c",
+        "upload-d",
+        "upload-e",
+        "upload-f",
+        "upload-g",
+        "ref-a",
+        "ref-b",
+        "ref-c",
+    ]
+    assert len(collect_saved_references(uploads, [original], limit=5)) == 5
+    assert collect_saved_references(uploads, [original], limit=0) == []
+
+    selected = ["upload-a", "upload-c"]
+    caption = _reference_library_caption(library, selected, 1)
+    assert "Фото <b>2/10</b>" in caption
+    assert "Выбрано: <b>2</b>" in caption
+    assert "portrait" not in caption
+    carousel_callbacks = _callbacks(
+        _reference_library_keyboard(library, selected, 1)
+    )
+    assert "refs:page:0" in carousel_callbacks
+    assert "refs:page:2" in carousel_callbacks
+    assert "refs:toggle:1" in carousel_callbacks
+    assert "refs:apply" in carousel_callbacks
+    assert not any(value.startswith("refs:use:") for value in carousel_callbacks)
+
+    assert _callback_index("refs:page:5", "refs:page:") == 5
+    assert _callback_index("refs:page:-1", "refs:page:") is None
     assert _callback_task_id("image:again:101", "image:again:") == 101
     assert _callback_task_id("image:again:not-a-number", "image:again:") is None
     assert _callback_task_id("refs:use:0", "refs:use:") is None
@@ -147,10 +207,14 @@ def main() -> None:
     assert "menu:more" not in source
     assert 'F.data.startswith("image:again:")' in source
     assert 'F.data == "image:submit"' in source
-    assert 'GenerationTask.user_id == user_id' in source
+    assert 'UploadedFile.user_id == user_id' in source
+    assert "InputMediaPhoto" in source
+    assert "message.answer_photo" in source
+    assert '"prompt": ""' in source
+    assert "_reference_button_text" not in source
 
     asyncio.run(backend_contract_regression())
-    print("Reference reuse and backend contract regression passed")
+    print("Reference photo carousel and backend contract regression passed")
 
 
 if __name__ == "__main__":
