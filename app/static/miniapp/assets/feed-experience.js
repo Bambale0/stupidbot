@@ -1,6 +1,7 @@
 const root = document.querySelector("#app");
 const telegramApp = window.Telegram?.WebApp || null;
 const REACTIONS_KEY = "banana-community-reactions-v1";
+const FEED_CACHE_TTL_MS = 30_000;
 
 const community = {
   items: [],
@@ -8,6 +9,7 @@ const community = {
   profileKey: "",
   loading: false,
   requestId: 0,
+  lastLoadedAt: 0,
 };
 
 let renderScheduled = false;
@@ -113,6 +115,7 @@ async function loadCommunityFeed({ quiet = false } = {}) {
       return;
     }
     community.items = Array.isArray(payload.items) ? payload.items : [];
+    community.lastLoadedAt = Date.now();
   } catch {
     if (!quiet) {
       showCommunityStatus("Не удалось загрузить сообщество.");
@@ -137,6 +140,9 @@ function enhanceFeedPage() {
   grid.classList.add("community-feed-root");
   if (community.items.length) {
     renderCommunity();
+    if (Date.now() - community.lastLoadedAt > FEED_CACHE_TTL_MS) {
+      loadCommunityFeed({ quiet: true });
+    }
   } else {
     loadCommunityFeed();
   }
@@ -392,6 +398,10 @@ async function sendReaction(taskId, type) {
 root?.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) {
+    return;
+  }
+  if (target.closest('[data-action="refresh-feed"]')) {
+    loadCommunityFeed();
     return;
   }
   const filter = target.closest("[data-community-filter]");
