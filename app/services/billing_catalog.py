@@ -23,6 +23,27 @@ SUBSCRIPTION_TERMS = (
     "и действует 30 дней. Продлить её можно повторной покупкой."
 )
 
+
+def _is_legacy_unlimited_disable(statement: str) -> bool:
+    normalized = " ".join(str(statement).lower().split())
+    return (
+        "update credit_packages" in normalized
+        and "set is_enabled = false" in normalized
+        and "where is_unlimited = true" in normalized
+        and "duration_days" not in normalized
+    )
+
+
+# Older current-policy code disabled every unlimited package on every init_db call.
+# Hybrid billing replaces that policy, so remove the legacy mutation before schema
+# compatibility statements are executed. Invalid subscriptions are still hidden by
+# package_is_user_visible when they have no positive duration.
+app_db.SCHEMA_COMPAT_SQL = tuple(
+    statement
+    for statement in app_db.SCHEMA_COMPAT_SQL
+    if not _is_legacy_unlimited_disable(statement)
+)
+
 HYBRID_BILLING_COMPAT_SQL: tuple[str, ...] = (
     f"""
     UPDATE credit_packages
