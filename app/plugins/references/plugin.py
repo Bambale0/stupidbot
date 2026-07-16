@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
+    InputMediaDocument,
     InputMediaPhoto,
     Message,
 )
@@ -333,8 +334,9 @@ async def _send_reference_library(
             REFERENCE_LIBRARY_INDEX_KEY: 0,
         }
     )
-    await message.answer_photo(
-        photo=items[0]["telegram_file_id"],
+    await _answer_reference_card(
+        message,
+        items[0],
         caption=_reference_library_caption(items, [], 0),
         reply_markup=_reference_library_keyboard(items, [], 0),
     )
@@ -349,21 +351,57 @@ async def _render_reference_card(
     if not callback.message:
         return
     item = items[index]
-    media = InputMediaPhoto(
-        media=str(item["telegram_file_id"]),
-        caption=_reference_library_caption(items, selected, index),
-    )
+    caption = _reference_library_caption(items, selected, index)
+    media = _reference_input_media(item, caption)
     keyboard = _reference_library_keyboard(items, selected, index)
     try:
         await callback.message.edit_media(media=media, reply_markup=keyboard)
     except TelegramBadRequest as exc:
         if "message is not modified" in str(exc).lower():
             return
-        await callback.message.answer_photo(
-            photo=item["telegram_file_id"],
-            caption=_reference_library_caption(items, selected, index),
+        await _answer_reference_card(
+            callback.message,
+            item,
+            caption=caption,
             reply_markup=keyboard,
         )
+
+
+async def _answer_reference_card(
+    message: Message,
+    item: dict[str, Any],
+    *,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    file_id = str(item["telegram_file_id"])
+    if _reference_media_type(item) == "photo":
+        await message.answer_photo(
+            photo=file_id,
+            caption=caption,
+            reply_markup=reply_markup,
+        )
+        return
+    await message.answer_document(
+        document=file_id,
+        caption=caption,
+        reply_markup=reply_markup,
+    )
+
+
+def _reference_input_media(
+    item: dict[str, Any],
+    caption: str,
+) -> InputMediaPhoto | InputMediaDocument:
+    file_id = str(item["telegram_file_id"])
+    if _reference_media_type(item) == "photo":
+        return InputMediaPhoto(media=file_id, caption=caption)
+    return InputMediaDocument(media=file_id, caption=caption)
+
+
+def _reference_media_type(item: dict[str, Any]) -> str:
+    filename = str(item.get("filename") or "")
+    return "photo" if filename.startswith("telegram-photo-") else "document"
 
 
 async def _send_reference_model_picker(
