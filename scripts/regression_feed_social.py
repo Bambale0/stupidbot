@@ -109,6 +109,7 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
     assert row["author_profile"]["likes"] == 2
     assert row["author_profile"]["dislikes"] == 1
     assert row["dislikes"] == 1
+    assert "prompt" not in row, "author prompt must never enter the public feed payload"
 
     stats_cache = session.info.get("feed_author_stats")
     assert isinstance(stats_cache, dict)
@@ -118,6 +119,7 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
     assert second_row["author_profile"]["works"] == 77, (
         "creator aggregates must be reused within one feed serialization session"
     )
+    assert "prompt" not in second_row
 
     ordered = await repositories.get_feed_tasks(session, limit=10)
     assert ordered[0].id == second.id, (
@@ -133,22 +135,32 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
     )
     assert dislike_row is not None
 
+    post_url = f"https://example.com/miniapp/?post={first.id}"
+    keyboard = feed_plugin._feed_keyboard(
+        first,
+        viewer_user_id=viewer.id,
+        index=0,
+        total=2,
+        dislikes=1,
+        post_url=post_url,
+    )
     callbacks = {
         button.callback_data
-        for row_buttons in feed_plugin._feed_keyboard(
-            first,
-            viewer_user_id=viewer.id,
-            index=0,
-            total=2,
-            dislikes=1,
-        ).inline_keyboard
+        for row_buttons in keyboard.inline_keyboard
         for button in row_buttons
         if button.callback_data
+    }
+    urls = {
+        button.url
+        for row_buttons in keyboard.inline_keyboard
+        for button in row_buttons
+        if button.url
     }
     assert f"feed:like:{first.id}" in callbacks
     assert f"feed:dislike:{first.id}" in callbacks
     assert f"feed:profile:{first.id}" in callbacks
     assert f"feed:repeat:{first.id}" in callbacks
+    assert post_url in urls
 
     admin_callbacks = {callback for _, callback in ux_plugin.ADMIN_HOME_BUTTONS}
     assert "admin:tariff:add" in admin_callbacks
@@ -165,6 +177,13 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
     feed_css = (project_root / "app/static/miniapp/assets/feed-experience.css").read_text(
         encoding="utf-8"
     )
+    post_js = (project_root / "app/static/miniapp/assets/feed-posts.js").read_text(
+        encoding="utf-8"
+    )
+    post_css = (project_root / "app/static/miniapp/assets/feed-posts.css").read_text(
+        encoding="utf-8"
+    )
+    feed_plugin_source = (project_root / "app/plugins/feed/plugin.py").read_text(encoding="utf-8")
     miniapp_index = (project_root / "app/static/miniapp/index.html").read_text(
         encoding="utf-8"
     )
@@ -185,5 +204,26 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
         ".community-reaction.is-dislike",
     ):
         assert contract in feed_css
+    for contract in (
+        "canonicalPostUrl",
+        "data-community-post-link",
+        "community-protected-prompt",
+        "URLSearchParams",
+        'searchParams.set("post"',
+        "Промпт автора скрыт и защищён",
+    ):
+        assert contract in post_js
+    for contract in (
+        ".community-permalink-bar",
+        ".community-protected-prompt",
+        ".community-link-button",
+        ".community-card.is-permalink-post",
+    ):
+        assert contract in post_css
+    assert "prompt=task.prompt" not in feed_plugin_source
+    assert "Промпт автора скрыт" in feed_plugin_source
+    assert "Ссылка на пост" in feed_plugin_source
     assert "feed-experience.css" in miniapp_index
     assert "feed-experience.js" in miniapp_index
+    assert "feed-posts.css" in miniapp_index
+    assert "feed-posts.js" in miniapp_index
