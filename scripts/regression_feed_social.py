@@ -177,7 +177,7 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
     feed_css = (project_root / "app/static/miniapp/assets/feed-experience.css").read_text(
         encoding="utf-8"
     )
-    post_js = (project_root / "app/static/miniapp/assets/feed-posts.js").read_text(
+    post_js = (project_root / "app/static/miniapp/assets/feed-posts-safe.js").read_text(
         encoding="utf-8"
     )
     post_css = (project_root / "app/static/miniapp/assets/feed-posts.css").read_text(
@@ -211,6 +211,10 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
         "URLSearchParams",
         'searchParams.set("post"',
         "Промпт автора скрыт и защищён",
+        "prompt.dataset.promptProtected",
+        "repeat.dataset.privateRepeat",
+        "const existingBar",
+        "if (existingBar)",
     ):
         assert contract in post_js
     for contract in (
@@ -226,4 +230,5 @@ async def run_feed_social_regression(session: AsyncSession, suffix: str) -> None
     assert "feed-experience.css" in miniapp_index
     assert "feed-experience.js" in miniapp_index
     assert "feed-posts.css" in miniapp_index
-    assert "feed-posts.js" in miniapp_index
+    assert "feed-posts-safe.js" in miniapp_index
+    assert 'src="assets/feed-posts.js' not in miniapp_index
