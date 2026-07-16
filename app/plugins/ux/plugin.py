@@ -22,6 +22,7 @@ ADMIN_HOME_BUTTONS: tuple[tuple[str, str], ...] = (
     ("Генерации", "admin:orders"),
     ("Платежи", "admin:payments"),
     ("Каталог", "admin:ux:catalog"),
+    ("Добавить тариф", "admin:tariff:add"),
     ("Партнёрка", "admin:ux:affiliate"),
     ("Коммуникации", "admin:ux:communications"),
     ("Система", "admin:ux:system"),
@@ -39,10 +40,11 @@ ADMIN_SECTIONS: dict[str, tuple[str, str, tuple[tuple[str, str], ...]]] = {
     ),
     "admin:ux:catalog": (
         "Каталог",
-        "Модели, цены, пакеты и публичные работы.",
+        "Модели, цены, тарифы, подписки и публичные работы.",
         (
+            ("Добавить тариф", "admin:tariff:add"),
+            ("Тарифы и подписки", "admin:packages"),
             ("Модели и цены", "admin:models"),
-            ("Пакеты", "admin:packages"),
             ("Публичные работы", "admin:gallery"),
         ),
     ),
@@ -77,7 +79,7 @@ def _admin_home_keyboard() -> InlineKeyboardMarkup:
     for text, callback_data in ADMIN_HOME_BUTTONS:
         builder.button(text=text, callback_data=callback_data)
     builder.button(text="Главная", callback_data="menu:main")
-    builder.adjust(2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 1, 1)
     return builder.as_markup()
 
 
@@ -115,13 +117,38 @@ async def admin_section(callback: CallbackQuery, context: AppContext, state: FSM
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin:tariff:add")
+async def admin_tariff_add(
+    callback: CallbackQuery,
+    context: AppContext,
+    state: FSMContext,
+) -> None:
+    if not await _require_admin(callback, context):
+        return
+    from app.plugins.admin import plugin as admin_plugin
+
+    await state.set_state(admin_plugin.AdminStates.package_add)
+    await state.update_data(package_step="code")
+    if callback.message:
+        await callback.message.answer(
+            "Новый тариф\n\n"
+            "Шаг 1 из 9. Введите уникальный короткий код латиницей.\n"
+            "Например: pro_month или video_50\n\n"
+            "Дальше можно настроить фото-, видео- и универсальные кредиты, "
+            "цену, срок подписки и условия.",
+            reply_markup=admin_plugin._cancel_keyboard("admin:packages"),
+        )
+    await callback.answer()
+
+
 def _install_admin_navigation() -> None:
     from app.plugins.admin import plugin as admin_plugin
 
     admin_plugin._admin_keyboard = _admin_home_keyboard
     admin_plugin._admin_home_text = lambda: (
         "<b>Админка</b>\n\n"
-        "Выберите раздел. Опасные действия остаются внутри соответствующих карточек."
+        "Выберите раздел. Новый тариф можно создать прямо с главного экрана. "
+        "Опасные действия остаются внутри соответствующих карточек."
     )
 
 
@@ -226,6 +253,7 @@ def _install_feed_refresh() -> None:
             viewer_user_id=viewer_user_id,
             index=0,
             total=1,
+            dislikes=int(row.get("dislikes") or 0),
         )
         try:
             await message.edit_caption(caption=caption[:1024], reply_markup=keyboard)
