@@ -40,9 +40,9 @@ from app.services.generation_catalog import (
 from app.ui import add_navigation_buttons, model_price_text, navigation_keyboard
 
 router = Router(name="references")
-REFERENCE_LIBRARY_SCAN_LIMIT = 300
-REFERENCE_LIBRARY_TASK_SCAN_LIMIT = 80
-REFERENCE_LIBRARY_LIMIT = 100
+REFERENCE_LIBRARY_SCAN_LIMIT = 30
+REFERENCE_LIBRARY_TASK_SCAN_LIMIT = 20
+REFERENCE_LIBRARY_LIMIT = 5
 REFERENCE_LIBRARY_ITEMS_KEY = "reference_library_items"
 REFERENCE_LIBRARY_SELECTED_KEY = "reference_library_selected"
 REFERENCE_LIBRARY_INDEX_KEY = "reference_library_index"
