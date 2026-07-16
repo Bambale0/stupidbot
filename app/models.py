@@ -68,6 +68,10 @@ class User(TimestampMixin, Base):
             "AND affiliate_debt_kopecks >= 0",
             name="ck_users_affiliate_amounts_non_negative",
         ),
+        CheckConstraint(
+            "free_photo_generations_remaining >= 0",
+            name="ck_users_free_photo_generations_non_negative",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -81,6 +85,11 @@ class User(TimestampMixin, Base):
     credits_balance: Mapped[int] = mapped_column(Integer, default=0)
     photo_credits_balance: Mapped[int] = mapped_column(Integer, default=0)
     video_credits_balance: Mapped[int] = mapped_column(Integer, default=0)
+    free_photo_generations_remaining: Mapped[int] = mapped_column(
+        Integer,
+        default=2,
+        server_default="2",
+    )
     common_credit_debt: Mapped[int] = mapped_column(Integer, default=0)
     photo_credit_debt: Mapped[int] = mapped_column(Integer, default=0)
     video_credit_debt: Mapped[int] = mapped_column(Integer, default=0)
