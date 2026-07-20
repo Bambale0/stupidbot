@@ -20,9 +20,14 @@ from app.services.admin_hardening import (
 )
 from app.services.financial_settings import validate_production_security
 from app.services.referrals import install_repository_patches
+from app.services.telegram_feed_links import (
+    install_http_telegram_feed_config_route,
+    install_telegram_feed_links_patch,
+)
 
 install_repository_patches()
 install_http_readiness_route()
+install_http_telegram_feed_config_route()
 
 from app.plugins.loader import load_plugins  # noqa: E402
 
@@ -89,6 +94,7 @@ def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
         name for name in context.settings.enabled_plugins if name != "ux"
     ]
     context.settings.enabled_plugins.append("ux")
+    install_telegram_feed_links_patch(context.settings)
     dispatcher = Dispatcher(storage=RedisStorage(redis=redis))
     dispatcher.message.middleware(ActionLoggingMiddleware())
     dispatcher.callback_query.middleware(ActionLoggingMiddleware())
