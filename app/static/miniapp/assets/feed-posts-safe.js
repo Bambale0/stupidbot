@@ -1,22 +1,60 @@
 const root = document.querySelector("#app");
 const telegramApp = window.Telegram?.WebApp || null;
 
+let telegramBotUsername = "eva_nana_bot";
 let requestedPostId = readRequestedPostId();
 let openingFeed = false;
 let enhanceQueued = false;
 
+function parsePostId(value) {
+  const normalized = String(value || "").trim();
+  const match = normalized.match(/^(?:post[_-])?(\d+)$/i);
+  if (!match) {
+    return 0;
+  }
+  const taskId = Number(match[1]);
+  return Number.isInteger(taskId) && taskId > 0 ? taskId : 0;
+}
+
+function readTelegramStartParam() {
+  const unsafeStartParam = telegramApp?.initDataUnsafe?.start_param;
+  if (unsafeStartParam) {
+    return String(unsafeStartParam);
+  }
+  return new URLSearchParams(window.location.search).get("tgWebAppStartParam") || "";
+}
+
 function readRequestedPostId() {
-  const raw = new URLSearchParams(window.location.search).get("post") || "";
-  const value = Number(raw);
-  return Number.isInteger(value) && value > 0 ? value : 0;
+  const directPostId = parsePostId(new URLSearchParams(window.location.search).get("post"));
+  return directPostId || parsePostId(readTelegramStartParam());
+}
+
+async function loadTelegramBotUsername() {
+  try {
+    const response = await fetch("/api/tma/app/config", {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    const username = String(payload.telegram_bot_username || "")
+      .trim()
+      .replace(/^@/, "");
+    if (/^[A-Za-z0-9_]{5,32}$/.test(username)) {
+      telegramBotUsername = username;
+    }
+  } catch {
+    // The production bot username fallback keeps sharing available during transient API failures.
+  }
 }
 
 function canonicalPostUrl(taskId) {
-  const url = new URL(window.location.href);
-  url.hash = "";
-  url.search = "";
-  url.searchParams.set("post", String(Number(taskId)));
-  return url.toString();
+  const normalizedTaskId = parsePostId(taskId);
+  if (!normalizedTaskId) {
+    throw new Error("invalid post id");
+  }
+  return `https://t.me/${telegramBotUsername}?startapp=post_${normalizedTaskId}`;
 }
 
 async function copyText(value) {
@@ -46,7 +84,13 @@ function showStatus(message) {
 }
 
 async function sharePost(taskId) {
-  const url = canonicalPostUrl(taskId);
+  let url = "";
+  try {
+    url = canonicalPostUrl(taskId);
+  } catch {
+    showStatus("Не удалось создать ссылку на пост.");
+    return;
+  }
   try {
     if (navigator.share) {
       await navigator.share({
@@ -57,14 +101,14 @@ async function sharePost(taskId) {
       return;
     }
     await copyText(url);
-    showStatus("Ссылка на пост скопирована.");
+    showStatus("Telegram-ссылка на пост скопирована.");
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       return;
     }
     try {
       await copyText(url);
-      showStatus("Ссылка на пост скопирована.");
+      showStatus("Telegram-ссылка на пост скопирована.");
     } catch {
       showStatus("Не удалось скопировать ссылку.");
     }
@@ -98,7 +142,7 @@ function addCommunityPostLink(card) {
   button.className = "community-link-button";
   button.dataset.communityPostLink = String(taskId);
   button.textContent = "Ссылка";
-  button.setAttribute("aria-label", "Поделиться ссылкой на пост");
+  button.setAttribute("aria-label", "Поделиться Telegram-ссылкой на пост");
   actions.prepend(button);
 }
 
@@ -113,7 +157,7 @@ function addAuthorWorkLink(card) {
   button.className = "community-author-link";
   button.dataset.communityPostLink = String(taskId);
   button.textContent = "⌁";
-  button.setAttribute("aria-label", "Ссылка на пост");
+  button.setAttribute("aria-label", "Telegram-ссылка на пост");
   card.appendChild(button);
 }
 
@@ -274,5 +318,6 @@ if (root) {
   observer.observe(root, { childList: true, subtree: true });
 }
 
+loadTelegramBotUsername();
 telegramApp?.ready?.();
 queueEnhance();
