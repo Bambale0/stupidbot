@@ -75,6 +75,41 @@ class Settings(BaseSettings):
         ],
     )
 
+    @field_validator("comet_image_simple_model", mode="before")
+    @classmethod
+    def migrate_deprecated_comet_lite_model(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if normalized in {
+            "gemini-3.1-flash-image-preview",
+            "gemini-3.1-flash-lite-image-preview",
+        }:
+            return "gemini-3.1-flash-lite-image"
+        return normalized or "gemini-3.1-flash-lite-image"
+
+    @field_validator("comet_image_pro_model", mode="before")
+    @classmethod
+    def migrate_deprecated_comet_pro_model(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if normalized == "gemini-3-pro-image-preview":
+            return "gemini-3-pro-image"
+        return normalized or "gemini-3-pro-image"
+
+    @field_validator("comet_image_2_model", mode="before")
+    @classmethod
+    def migrate_deprecated_comet_flash_model(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if normalized == "gemini-3.1-flash-image-preview":
+            return "gemini-3.1-flash-image"
+        return normalized or "gemini-3.1-flash-image"
+
+    @field_validator("kie_image_simple_model", mode="before")
+    @classmethod
+    def migrate_deprecated_kie_lite_model(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if normalized in {"nano-banana-2", "nano-banana-lite"}:
+            return "nano-banana-2-lite"
+        return normalized or "nano-banana-2-lite"
+
     @field_validator("admin_ids", mode="before")
     @classmethod
     def parse_admin_ids(cls, value: object) -> list[int]:

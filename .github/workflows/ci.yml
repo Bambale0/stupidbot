@@ -33,16 +33,16 @@ jobs:
       COMET_API_KEY: ci-comet-key
       COMET_BASE_URL: https://api.cometapi.com
       COMET_CALLBACK_SECRET: ci-comet-secret
-      COMET_IMAGE_SIMPLE_MODEL: gemini-3.1-flash-image-preview
-      COMET_IMAGE_PRO_MODEL: gemini-3-pro-image-preview
-      COMET_IMAGE_2_MODEL: gemini-3.1-flash-image-preview
+      COMET_IMAGE_SIMPLE_MODEL: gemini-3.1-flash-lite-image
+      COMET_IMAGE_PRO_MODEL: gemini-3-pro-image
+      COMET_IMAGE_2_MODEL: gemini-3.1-flash-image
       COMET_KLING_2_6_MODEL: kling-v2-6
       COMET_KLING_3_0_MODEL: kling-v2-master
       COMET_SEEDANCE_2_MODEL: doubao-seedance-2-0
       KIE_API_KEY: ci-kie-key
       KIE_BASE_URL: https://api.kie.ai
       KIE_UPLOAD_BASE_URL: https://kieai.redpandaai.co
-      KIE_IMAGE_SIMPLE_MODEL: nano-banana-2
+      KIE_IMAGE_SIMPLE_MODEL: nano-banana-2-lite
       KIE_IMAGE_PRO_MODEL: nano-banana-pro
       KIE_IMAGE_2_MODEL: nano-banana-2
       KIE_KLING_2_6_MODEL: kling-2.6/image-to-video
