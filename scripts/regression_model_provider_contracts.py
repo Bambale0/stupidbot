@@ -24,14 +24,6 @@ def _model(code: str) -> dict[str, Any]:
     return next(item for item in DEFAULT_MODELS if item["code"] == code)
 
 
-class _FakeResponse:
-    status_code = 200
-    text = ""
-
-    def json(self) -> dict[str, Any]:
-        return {"code": 200, "msg": "success", "data": {"taskId": "lite-task"}}
-
-
 class _FakeHttpClient:
     last_json: dict[str, Any] | None = None
 
@@ -44,10 +36,14 @@ class _FakeHttpClient:
     async def __aexit__(self, *args: Any) -> None:
         del args
 
-    async def post(self, path: str, **kwargs: Any) -> _FakeResponse:
+    async def post(self, path: str, **kwargs: Any) -> httpx.Response:
         assert path == "/api/v1/jobs/createTask"
         _FakeHttpClient.last_json = kwargs.get("json")
-        return _FakeResponse()
+        return httpx.Response(
+            200,
+            json={"code": 200, "msg": "success", "data": {"taskId": "lite-task"}},
+            request=httpx.Request("POST", f"https://api.kie.ai{path}"),
+        )
 
 
 def check_catalog() -> None:
@@ -162,7 +158,7 @@ def check_frontend_contract() -> None:
         'videoFormats: ["MP4", "MOV"]',
     ):
         assert contract in catalog
-    assert 'window.BANANA_MODEL_SETTINGS' in payload
+    assert "window.BANANA_MODEL_SETTINGS" in payload
     assert 'resolution: "2K"' not in payload
     assert 'aspect: "9:16"' not in payload
     assert 'data-model-setting="aspectRatio"' in ui
