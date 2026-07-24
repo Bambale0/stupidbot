@@ -2,29 +2,34 @@
 
 Проверено: 24 июля 2026 года.
 
-Этот документ фиксирует только параметры, которые реально принимает текущий provider endpoint. UI, FSM, Mini App payload и server-side validation должны брать значения из `app/services/generation_catalog.py`, а не из отдельных статических списков.
+Этот документ фиксирует параметры, которые реально принимает текущий provider endpoint. UI, FSM, Mini App payload и server-side validation берут значения из `app/services/generation_catalog.py`, а не из независимых статических списков.
+
+`auto` в настройке соотношения сторон означает, что `imageConfig.aspectRatio` не отправляется основному Gemini-провайдеру. Тогда text-to-image использует стандартное поведение модели, а image-to-image может учитывать геометрию референса.
 
 ## Nano Banana 2 Lite
 
 - Модель: `gemini-3.1-flash-lite-image`.
 - Основной провайдер: CometAPI-compatible Gemini Generate Content.
 - Резолюция: только `1K`.
-- Aspect ratio: `1:1`, `3:2`, `2:3`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`.
-- Референсы: от 0 до 14 изображений.
-- KIE fallback: `nano-banana-2-lite`; его payload использует `image_urls` и не получает поля `resolution`, `output_format` или `image_input`.
+- Aspect ratio: `auto`, `1:1`, `1:4`, `1:8`, `2:3`, `3:2`, `3:4`, `4:1`, `4:3`, `4:5`, `5:4`, `8:1`, `9:16`, `16:9`, `21:9`.
+- Референсы основного Gemini-пути: от 0 до 14 изображений.
+- KIE fallback: `nano-banana-2-lite`; принимает до 10 `image_urls`, поддерживает тот же набор aspect ratio и не принимает поля `resolution`, `output_format` или `image_input`.
+- Пользовательский выбор PNG/JPG не показывается: основной Gemini Generate Content endpoint не предоставляет такого входного параметра. Формат определяется ответом провайдера; KIE fallback использует свой default.
 
 Источники:
 
 - https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image
 - https://ai.google.dev/gemini-api/docs/image-generation
+- https://docs.kie.ai/market/google/nano-banana-2-lite
 
 ## Nano Banana 2
 
 - Модель: `gemini-3.1-flash-image`.
 - Резолюции: `512`, `1K`, `2K`, `4K`.
-- Aspect ratio: `1:1`, `1:4`, `1:8`, `2:3`, `3:2`, `3:4`, `4:1`, `4:3`, `4:5`, `5:4`, `8:1`, `9:16`, `16:9`, `21:9`.
-- Референсы: от 0 до 14 изображений. Внутри лимита модель документирует до 10 объектных и до 4 character-reference изображений.
+- Aspect ratio: `auto`, `1:1`, `1:4`, `1:8`, `2:3`, `3:2`, `3:4`, `4:1`, `4:3`, `4:5`, `5:4`, `8:1`, `9:16`, `16:9`, `21:9`.
+- Референсы: от 0 до 14 изображений. Внутри общего лимита Google документирует до 10 объектных и до 4 character-reference изображений.
 - KIE fallback: `nano-banana-2` с полями `image_input`, `aspect_ratio`, `resolution`, `output_format`.
+- Выбор выходного PNG/JPG не выводится в общий UI, поскольку основной Gemini Generate Content endpoint не принимает этот параметр. KIE-специфичный `output_format` остаётся внутренним fallback-default.
 
 Источники:
 
@@ -36,12 +41,14 @@
 
 - Модель: `gemini-3-pro-image`.
 - Резолюции: `1K`, `2K`, `4K`.
-- Aspect ratio: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`.
-- Референсы: от 0 до 14 изображений. Документированы до 6 объектных, до 5 character-reference и до 3 style-reference изображений в рамках общего лимита.
+- Aspect ratio: `auto`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`.
+- Референсы: от 0 до 14 изображений. Google документирует до 6 объектных, до 5 character-reference и до 3 style-reference изображений в рамках общего лимита.
+- Выходной MIME не предлагается как пользовательская настройка основного Gemini-пути.
 
-Источник:
+Источники:
 
 - https://ai.google.dev/gemini-api/docs/image-generation
+- https://docs.kie.ai/market/google/pro-image-to-image
 
 ## Kling 2.6 Motion Control
 
@@ -50,7 +57,7 @@
 - Изображение: JPEG/PNG, до 10 MB.
 - Видео: MP4, QuickTime/MOV или Matroska/MKV, до 100 MB, от 3 до 30 секунд.
 - Mode: только `720p`.
-- `character_orientation`: `image` или `video`; default проекта — `image`, как в официальном request example.
+- `character_orientation`: пользователь выбирает `image` или `video`; default — `image`, как в официальном request example.
 
 Источник:
 
@@ -64,8 +71,8 @@
 - Видео: MP4 или QuickTime/MOV, до 100 MB, от 3 до 30 секунд. MKV не принимается.
 - Для изображения и видео каждая сторона должна быть больше 340 px; допустимое соотношение сторон — от `2:5` до `5:2`.
 - Mode: только `720p`.
-- `background_source`: `input_video`.
-- `character_orientation`: `image` или `video`; default проекта — `image`.
+- `background_source`: фиксированное значение `input_video` из официального request contract.
+- `character_orientation`: пользователь выбирает `image` или `video`; default — `image`.
 
 Источник:
 
@@ -74,12 +81,12 @@
 ## Seedance 2.0
 
 - Основная модель CometAPI: `doubao-seedance-2-0` через `/v1/videos`.
-- Режимы: text-to-video без изображения или image-to-video с одним `input_reference`.
+- Основной путь: text-to-video без изображения или image-to-video с одним `input_reference`.
 - Длительность: любое целое значение от 4 до 15 секунд.
 - Aspect ratio: `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16`.
-- Резолюции: `480p`, `720p`, `1080p` для стандартной модели; default `720p`.
+- Резолюции: `480p`, `720p`, `1080p`; default `720p`.
 - Стартовое изображение необязательно; принимаются JPEG, PNG и WebP.
-- KIE fallback: `bytedance/seedance-2`; без изображения используется text-to-video, с изображением — `first_frame_url`.
+- KIE fallback `bytedance/seedance-2` поддерживает text-to-video и 0–2 first/last-frame изображения, а также отдельный multimodal-reference режим. Эти сценарии взаимоисключающие. Текущий общий UI использует совместимый основной режим: без изображения или с одним стартовым изображением.
 
 Источники:
 
@@ -90,7 +97,8 @@
 ## Правила синхронизации
 
 - Существующие строки `generation_models` обновляются из каталога при `ensure_defaults`.
-- Provider model IDs, лимиты, MIME-типы и опции не должны задаваться независимо в Telegram и Mini App.
+- Provider model IDs, лимиты, MIME-типы и опции не задаются независимо в Telegram и Mini App.
 - Любое добавление модели требует обновления этого документа и `scripts/regression_model_provider_contracts.py`.
 - Неподдерживаемые параметры нормализуются к model-specific default до создания provider task.
 - Файловые ограничения Kling 3.0 проверяются до списания кредитов и вызова KIE API.
+- Настройки, доступные только fallback-провайдеру, не выдаются за универсальные возможности основного пути.
