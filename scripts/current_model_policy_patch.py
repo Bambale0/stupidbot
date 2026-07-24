@@ -60,7 +60,6 @@ def install(adapter: Any) -> None:
             "comet_image_2_model": settings.comet_image_2_model,
         }
         saved_models = legacy.DEFAULT_MODELS
-        saved_resolutions = legacy.IMAGE_RESOLUTIONS
         saved_aspects = legacy.IMAGE_ASPECT_RATIOS
         saved_resolution_normalizer = legacy.normalize_image_resolution
         saved_aspect_normalizer = legacy.normalize_image_aspect_ratio
@@ -70,7 +69,6 @@ def install(adapter: Any) -> None:
             settings.comet_image_pro_model = "gemini-3-pro-image-preview"
             settings.comet_image_2_model = "gemini-3.1-flash-image-preview"
             legacy.DEFAULT_MODELS = _legacy_models(saved_models)
-            legacy.IMAGE_RESOLUTIONS = ["2K", "4K"]
             legacy.IMAGE_ASPECT_RATIOS = ["9:16", "16:9", "4:3", "1:1"]
             legacy.normalize_image_resolution = _legacy_resolution
             legacy.normalize_image_aspect_ratio = _legacy_aspect
@@ -80,7 +78,6 @@ def install(adapter: Any) -> None:
             for field, value in settings_fields.items():
                 setattr(settings, field, value)
             legacy.DEFAULT_MODELS = saved_models
-            legacy.IMAGE_RESOLUTIONS = saved_resolutions
             legacy.IMAGE_ASPECT_RATIOS = saved_aspects
             legacy.normalize_image_resolution = saved_resolution_normalizer
             legacy.normalize_image_aspect_ratio = saved_aspect_normalizer
