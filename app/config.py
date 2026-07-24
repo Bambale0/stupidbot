@@ -37,9 +37,9 @@ class Settings(BaseSettings):
 
     comet_api_key: str | None = None
     comet_base_url: str = "https://api.cometapi.com"
-    comet_image_simple_model: str = "gemini-3.1-flash-image-preview"
-    comet_image_pro_model: str = "gemini-3-pro-image-preview"
-    comet_image_2_model: str = "gemini-3.1-flash-image-preview"
+    comet_image_simple_model: str = "gemini-3.1-flash-lite-image"
+    comet_image_pro_model: str = "gemini-3-pro-image"
+    comet_image_2_model: str = "gemini-3.1-flash-image"
     comet_kling_2_6_model: str = "kling-v2-6"
     comet_kling_3_0_model: str = "kling-v2-master"
     comet_seedance_2_model: str = "doubao-seedance-2-0"
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     kie_api_key: str | None = None
     kie_base_url: str = "https://api.kie.ai"
     kie_upload_base_url: str = "https://kieai.redpandaai.co"
-    kie_image_simple_model: str = "nano-banana-2"
+    kie_image_simple_model: str = "nano-banana-2-lite"
     kie_image_pro_model: str = "nano-banana-pro"
     kie_image_2_model: str = "nano-banana-2"
     kie_kling_2_6_model: str = "kling-2.6/image-to-video"
