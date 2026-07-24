@@ -19,6 +19,11 @@ from app.services.admin_hardening import (
     shutdown_admin_background_tasks,
 )
 from app.services.financial_settings import validate_production_security
+from app.services.model_contracts import (
+    install_generation_model_contracts,
+    install_kie_image_contract,
+    install_model_repository_contracts,
+)
 from app.services.referrals import install_repository_patches
 from app.services.telegram_feed_links import (
     install_http_telegram_feed_config_route,
@@ -26,6 +31,8 @@ from app.services.telegram_feed_links import (
 )
 
 install_repository_patches()
+install_model_repository_contracts()
+install_kie_image_contract()
 install_http_readiness_route()
 install_http_telegram_feed_config_route()
 
@@ -100,6 +107,7 @@ def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
     dispatcher.callback_query.middleware(ActionLoggingMiddleware())
     dispatcher["context"] = context
     load_plugins(dispatcher, context)
+    install_generation_model_contracts(dispatcher, context)
     install_admin_hardening_patch(context)
     dispatcher.shutdown.register(_shutdown_admin_tasks)
     return dispatcher
