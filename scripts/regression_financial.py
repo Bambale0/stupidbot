@@ -12,9 +12,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import get_settings
 from app.db import build_engine, init_db
+from app.services.model_contracts import (
+    install_kie_image_contract,
+    install_model_repository_contracts,
+)
 from app.services.referrals import install_repository_patches
 
 install_repository_patches()
+install_model_repository_contracts()
+install_kie_image_contract()
 
 from scripts.financial_regression_core import run_core  # noqa: E402
 from scripts.financial_regression_guards import (  # noqa: E402
@@ -25,6 +31,15 @@ from scripts.regression_admin_operations import run_admin_operations_regression 
 from scripts.regression_billing_referrals import run_billing_referral_regression  # noqa: E402
 from scripts.regression_feed_social import run_feed_social_regression  # noqa: E402
 from scripts.regression_growth_rewards import run_growth_rewards_regression  # noqa: E402
+from scripts.regression_model_env_migration import (  # noqa: E402
+    run_model_env_migration_regression,
+)
+from scripts.regression_model_provider_contracts import (  # noqa: E402
+    check_catalog,
+    check_frontend_contract,
+    check_kie_lite_payload,
+    check_normalization_and_geometry,
+)
 from scripts.regression_telegram_feed_links import (  # noqa: E402
     run_telegram_feed_links_regression,
 )
@@ -50,6 +65,11 @@ async def amain() -> None:
                 await run_feed_social_regression(session, suffix)
         finally:
             await transaction.rollback()
+    check_catalog()
+    check_normalization_and_geometry()
+    await check_kie_lite_payload()
+    check_frontend_contract()
+    run_model_env_migration_regression()
     run_telegram_feed_links_regression()
     await engine.dispose()
     print("financial integrity regression passed")

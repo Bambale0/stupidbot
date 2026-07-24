@@ -35,10 +35,13 @@ def check_catalog_contracts() -> None:
     lite = next(item for item in DEFAULT_MODELS if item["code"] == "nano-banana")
     assert lite["title"] == "Nano Banana 2 Lite"
     assert lite["price_credits"] == 2
-    assert lite["config"]["provider"] == "kie"
-    assert lite["config"]["provider_model"] == PROVIDER_MODEL
+    assert lite["config"]["provider"] == "comet"
+    assert lite["config"]["provider_model"] == "gemini-3.1-flash-lite-image"
+    assert lite["config"]["fallback_provider"] == "kie"
+    assert lite["config"]["fallback_model"] == PROVIDER_MODEL
     assert lite["config"]["resolutions"] == ["1K"]
-    assert lite["config"]["max_images"] == MAX_REFERENCE_IMAGES
+    assert lite["config"]["max_images"] == 14
+    assert lite["config"]["fallback_max_images"] == MAX_REFERENCE_IMAGES
     assert lite["config"]["output_formats"] == []
 
     payload = build_nano_banana_2_lite_payload(

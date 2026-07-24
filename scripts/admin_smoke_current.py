@@ -189,7 +189,7 @@ async def _check_database_workflows() -> None:
                     status="success",
                     prompt="feed prompt",
                     result_urls=["https://example.com/feed.jpg"],
-                    input_payload={"resolution": "2K"},
+                    input_payload={"resolution": "1K"},
                 )
                 foreign_source = GenerationTask(
                     user_id=admin_user.id,
@@ -273,20 +273,27 @@ async def _check_database_workflows() -> None:
                 )
                 assert banana_models, "banana models must exist"
                 by_code = {banana.code: banana for banana in banana_models}
+
                 lite = by_code["nano-banana"]
                 assert lite.title == "Nano Banana 2 Lite"
-                assert lite.config.get("provider") == "kie", lite.config
-                assert lite.config.get("provider_model") == "nano-banana-2-lite", lite.config
+                assert lite.config.get("provider") == "comet", lite.config
+                assert lite.config.get("provider_model") == "gemini-3.1-flash-lite-image", lite.config
+                assert lite.config.get("fallback_provider") == "kie", lite.config
+                assert lite.config.get("fallback_model") == "nano-banana-2-lite", lite.config
                 assert lite.config.get("resolutions") == ["1K"], lite.config
                 assert lite.config.get("output_formats") == [], lite.config
-                assert lite.config.get("max_images") == 10, lite.config
-                for code, expected_max_images in (
-                    ("nano-banana-pro", 8),
-                    ("nano-banana-2", 14),
-                ):
-                    banana = by_code[code]
-                    assert banana.config.get("resolutions") == ["2K", "4K"], banana.config
-                    assert banana.config.get("max_images") == expected_max_images, banana.config
+                assert lite.config.get("max_images") == 14, lite.config
+                assert lite.config.get("fallback_max_images") == 10, lite.config
+
+                pro = by_code["nano-banana-pro"]
+                assert pro.config.get("provider_model") == "gemini-3-pro-image", pro.config
+                assert pro.config.get("resolutions") == ["1K", "2K", "4K"], pro.config
+                assert pro.config.get("max_images") == 14, pro.config
+
+                flash = by_code["nano-banana-2"]
+                assert flash.config.get("provider_model") == "gemini-3.1-flash-image", flash.config
+                assert flash.config.get("resolutions") == ["512", "1K", "2K", "4K"], flash.config
+                assert flash.config.get("max_images") == 14, flash.config
         finally:
             await transaction.rollback()
     await engine.dispose()

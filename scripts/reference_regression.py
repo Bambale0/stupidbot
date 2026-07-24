@@ -9,7 +9,7 @@ if __package__ in {None, ""}:
     add_project_root_to_path()
 
 from app.models import GenerationModel, GenerationTask, UploadedFile
-from app.plugins.generation.plugin import _image_settings_keyboard, _repeat_image_state_payload
+from app.plugins.generation.plugin import _repeat_image_state_payload
 from app.plugins.loader import normalized_plugin_names
 from app.plugins.references.plugin import (
     REFERENCE_LIBRARY_LIMIT,
@@ -23,6 +23,7 @@ from app.plugins.references.plugin import (
     reference_signature,
     submit_image_from_settings,
 )
+from app.services.model_contract_corrections import _image_settings_keyboard
 from app.ui import model_keyboard
 from scripts.regression_backend_contracts import amain as backend_contract_regression
 
@@ -110,8 +111,16 @@ def main() -> None:
     ]
     assert reference_signature(original) == ("ref-a", "ref-b")
 
-    keyboard_payload = {**payload, "image_limits": {"max_images": 14}}
-    assert "image:submit" in _callbacks(_image_settings_keyboard(keyboard_payload))
+    keyboard_payload = {
+        **payload,
+        "model_code": "nano-banana-2",
+        "image_limits": {"max_images": 14},
+    }
+    callbacks = _callbacks(_image_settings_keyboard(keyboard_payload))
+    assert "image:submit" in callbacks
+    assert "image:resolution:512" in callbacks
+    assert "image:aspect:1:8" in callbacks
+    assert not any(value.startswith("image:format:") for value in callbacks)
     assert callable(submit_image_from_settings)
 
     saved = collect_reference_tasks([original, duplicate, video, unique], limit=10)
@@ -179,15 +188,15 @@ def main() -> None:
 
     image_model = GenerationModel(
         code="nano-banana-2",
-        title="Banana 2",
+        title="Nano Banana 2",
         category="image",
         price_credits=5,
         is_enabled=True,
         position=1,
     )
     video_model = GenerationModel(
-        code="seedance-2",
-        title="Seedance 2",
+        code="seedance-2/video",
+        title="Seedance 2.0",
         category="video",
         price_credits=10,
         is_enabled=True,
@@ -213,7 +222,7 @@ def main() -> None:
     assert "_reference_button_text" not in source
 
     asyncio.run(backend_contract_regression())
-    print("Five-card reference carousel and backend contract regression passed")
+    print("Five-card reference carousel and model-specific settings regression passed")
 
 
 if __name__ == "__main__":
