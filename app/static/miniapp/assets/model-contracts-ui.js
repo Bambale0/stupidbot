@@ -1,4 +1,4 @@
-import { MODEL_CATALOG } from "./catalog.js?v=20260724-provider1";
+import { MODEL_CATALOG } from "./catalog.js?v=20260724-provider2";
 
 const root = document.querySelector("#app");
 window.BANANA_MODEL_SETTINGS = window.BANANA_MODEL_SETTINGS || {};
@@ -14,10 +14,14 @@ function ensureSettings(code) {
   const model = modelFor(code);
   const settings = window.BANANA_MODEL_SETTINGS[code] || {};
   const normalized = {
-    aspectRatio: settings.aspectRatio || model.defaultAspectRatio || model.aspectRatios?.[0] || "1:1",
+    aspectRatio: settings.aspectRatio || model.defaultAspectRatio || model.aspectRatios?.[0] || "auto",
     resolution: settings.resolution || model.defaultResolution || model.resolutions?.[0] || "1K",
     duration: settings.duration || model.defaultDuration || model.durations?.[0] || "5",
-    outputFormat: settings.outputFormat || model.defaultOutputFormat || model.outputFormats?.[0] || "png",
+    characterOrientation:
+      settings.characterOrientation ||
+      model.defaultCharacterOrientation ||
+      model.characterOrientations?.[0] ||
+      "image",
   };
   window.BANANA_MODEL_SETTINGS[code] = normalized;
   return normalized;
@@ -29,12 +33,16 @@ function optionList(values, selected) {
     .join("");
 }
 
+function documentedAspectCount(model) {
+  return (model.aspectRatios || []).filter((value) => value !== "auto").length;
+}
+
 function capabilityText(model) {
   if (model.kind === "image") {
     const references = model.minImages === 0
       ? `0–${model.maxImages} референсов`
       : `${model.maxImages} референс`;
-    return `${references} · ${(model.resolutions || []).join("/")} · ${(model.aspectRatios || []).length} форматов`;
+    return `${references} · ${(model.resolutions || []).join("/")} · ${documentedAspectCount(model)} форматов`;
   }
   if (activeModelCode.startsWith("kling")) {
     const geometry = model.minDimension
@@ -73,11 +81,11 @@ function renderControls() {
       </label>
     `);
   }
-  if (model.outputFormats?.length) {
+  if (model.characterOrientations?.length) {
     controls.push(`
       <label class="field-label model-contract-field">
-        Формат файла
-        <select data-model-setting="outputFormat">${optionList(model.outputFormats, settings.outputFormat)}</select>
+        Ориентация персонажа
+        <select data-model-setting="characterOrientation">${optionList(model.characterOrientations, settings.characterOrientation)}</select>
       </label>
     `);
   }
@@ -107,9 +115,12 @@ function updateHandoff() {
   const handoff = root?.querySelector(".handoff-card small");
   if (!handoff) return;
   if (model.kind === "image") {
-    handoff.textContent = `Референсы необязательны. Модель принимает до ${model.maxImages} изображений; можно продолжить только с промптом.`;
+    const fallbackNote = model.fallbackMaxImages && model.fallbackMaxImages < model.maxImages
+      ? ` При fallback KIE используются первые ${model.fallbackMaxImages}.`
+      : "";
+    handoff.textContent = `Референсы необязательны. Модель принимает до ${model.maxImages} изображений; можно продолжить только с промптом.${fallbackNote}`;
   } else if (activeModelCode === "seedance-2/video") {
-    handoff.textContent = `Text-to-video или одно стартовое изображение. Длительность ${model.durations[0]}–${model.durations.at(-1)} сек.`;
+    handoff.textContent = `Text-to-video или одно стартовое изображение в основном Comet-пути. Длительность ${model.durations[0]}–${model.durations.at(-1)} сек.`;
   } else {
     handoff.textContent = `Одно изображение персонажа и одно видео движения ${model.durationMin}–${model.durationMax} сек. Форматы видео: ${model.videoFormats.join(", ")}.`;
   }
