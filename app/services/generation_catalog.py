@@ -23,37 +23,15 @@ IMAGE_ASPECT_RATIOS = [
     "21:9",
 ]
 DEFAULT_IMAGE_RESOLUTION = "1K"
-DEFAULT_IMAGE_ASPECT_RATIO = "1:1"
+DEFAULT_IMAGE_ASPECT_RATIO = "auto"
 
-GEMINI_FLASH_LITE_ASPECT_RATIOS = [
-    "1:1",
-    "3:2",
-    "2:3",
-    "3:4",
-    "4:3",
-    "4:5",
-    "5:4",
-    "9:16",
-    "16:9",
-    "21:9",
-]
-GEMINI_FLASH_ASPECT_RATIOS = [
-    "1:1",
-    "1:4",
-    "1:8",
-    "2:3",
-    "3:2",
-    "3:4",
-    "4:1",
-    "4:3",
-    "4:5",
-    "5:4",
-    "8:1",
-    "9:16",
-    "16:9",
-    "21:9",
-]
+# `auto` means omitting imageConfig.aspectRatio for Gemini and is also accepted
+# directly by the KIE image endpoints. The remaining values are the documented
+# output aspect ratios.
+GEMINI_FLASH_LITE_ASPECT_RATIOS = list(IMAGE_ASPECT_RATIOS)
+GEMINI_FLASH_ASPECT_RATIOS = list(IMAGE_ASPECT_RATIOS)
 GEMINI_PRO_ASPECT_RATIOS = [
+    "auto",
     "1:1",
     "2:3",
     "3:2",
@@ -73,7 +51,7 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
         "code": "nano-banana",
         "title": "Nano Banana 2 Lite",
         "category": "image",
-        "description": "Gemini 3.1 Flash Lite Image: 1K, до 14 референсов.",
+        "description": "Gemini 3.1 Flash Lite Image: 1K, 14 форматов, до 14 референсов.",
         "position": 10,
         "price_credits": 2,
         "config": {
@@ -85,12 +63,12 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
             "documentation_url": "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image",
             "aspect_ratios": GEMINI_FLASH_LITE_ASPECT_RATIOS,
             "resolutions": ["1K"],
-            "default_aspect_ratio": "1:1",
+            "default_aspect_ratio": "auto",
             "default_resolution": "1K",
-            "output_formats": ["png", "jpg"],
-            "default_output_format": "png",
+            "output_formats": [],
             "min_images": 0,
             "max_images": 14,
+            "fallback_max_images": 10,
             "reference_mime_types": ["image/jpeg", "image/png", "image/webp"],
         },
     },
@@ -110,10 +88,9 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
             "documentation_url": "https://ai.google.dev/gemini-api/docs/image-generation",
             "aspect_ratios": GEMINI_PRO_ASPECT_RATIOS,
             "resolutions": ["1K", "2K", "4K"],
-            "default_aspect_ratio": "1:1",
+            "default_aspect_ratio": "auto",
             "default_resolution": "1K",
-            "output_formats": ["png", "jpg"],
-            "default_output_format": "png",
+            "output_formats": [],
             "min_images": 0,
             "max_images": 14,
             "reference_mime_types": ["image/jpeg", "image/png", "image/webp"],
@@ -135,10 +112,9 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
             "documentation_url": "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-image",
             "aspect_ratios": GEMINI_FLASH_ASPECT_RATIOS,
             "resolutions": ["512", "1K", "2K", "4K"],
-            "default_aspect_ratio": "1:1",
+            "default_aspect_ratio": "auto",
             "default_resolution": "1K",
-            "output_formats": ["png", "jpg"],
-            "default_output_format": "png",
+            "output_formats": [],
             "min_images": 0,
             "max_images": 14,
             "reference_mime_types": ["image/jpeg", "image/png", "image/webp"],
@@ -228,6 +204,7 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
             "default_resolution": "720p",
             "min_images": 0,
             "max_images": 1,
+            "fallback_max_images": 2,
             "reference_image_mime_types": ["image/jpeg", "image/png", "image/webp"],
             "input_reference_optional": True,
         },
