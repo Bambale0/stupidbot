@@ -23,7 +23,7 @@ from app.plugins.references.plugin import (
     reference_signature,
     submit_image_from_settings,
 )
-from app.services.model_contracts import _image_settings_keyboard
+from app.services.model_contract_corrections import _image_settings_keyboard
 from app.ui import model_keyboard
 from scripts.regression_backend_contracts import amain as backend_contract_regression
 
@@ -52,7 +52,6 @@ def _image_task(
             "prompt": prompt,
             "aspect_ratio": "9:16",
             "resolution": "4K",
-            "output_format": "png",
             "references": references,
             "max_reference_images": 14,
         },
@@ -115,14 +114,13 @@ def main() -> None:
     keyboard_payload = {
         **payload,
         "model_code": "nano-banana-2",
-        "output_format": "png",
         "image_limits": {"max_images": 14},
     }
     callbacks = _callbacks(_image_settings_keyboard(keyboard_payload))
     assert "image:submit" in callbacks
     assert "image:resolution:512" in callbacks
     assert "image:aspect:1:8" in callbacks
-    assert "image:format:jpg" in callbacks
+    assert not any(value.startswith("image:format:") for value in callbacks)
     assert callable(submit_image_from_settings)
 
     saved = collect_reference_tasks([original, duplicate, video, unique], limit=10)
