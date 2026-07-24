@@ -19,6 +19,7 @@ from app.services.admin_hardening import (
     shutdown_admin_background_tasks,
 )
 from app.services.financial_settings import validate_production_security
+from app.services.model_contract_bindings import bind_corrected_model_handlers
 from app.services.model_contract_corrections import install_model_contract_corrections
 from app.services.model_contracts import (
     install_generation_model_contracts,
@@ -110,6 +111,7 @@ def create_dispatcher(context: AppContext, redis: Redis) -> Dispatcher:
     load_plugins(dispatcher, context)
     install_generation_model_contracts(dispatcher, context)
     install_model_contract_corrections(dispatcher)
+    bind_corrected_model_handlers()
     install_admin_hardening_patch(context)
     dispatcher.shutdown.register(_shutdown_admin_tasks)
     return dispatcher
