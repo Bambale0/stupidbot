@@ -59,6 +59,7 @@ class Settings(BaseSettings):
 
     tbank_terminal_key: str | None = None
     tbank_password: str | None = None
+    tbank_notification_url: str | None = None
     tbank_success_url: str | None = None
     tbank_fail_url: str | None = None
     tbank_test_smoke_enabled: bool = False
@@ -156,6 +157,8 @@ class Settings(BaseSettings):
 
     @property
     def tbank_callback_url(self) -> str:
+        if self.tbank_notification_url:
+            return self.tbank_notification_url.rstrip("/")
         return f"{self.public_base_url.rstrip('/')}/payments/tbank/callback"
 
 
