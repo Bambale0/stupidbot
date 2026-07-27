@@ -256,18 +256,6 @@ class ModelContractWebAppMiddleware(BaseMiddleware):
         if updates:
             await state.update_data(**updates)
 
-        if isinstance(event, Message) and model_code in {
-            "nano-banana",
-            "nano-banana-pro",
-            "nano-banana-2",
-        }:
-            await event.answer(
-                "Референсы необязательны: можно продолжить только с промптом.",
-                reply_markup=_single_callback_keyboard(
-                    "Продолжить без референса",
-                    "image:no_reference",
-                ),
-            )
         if isinstance(event, Message) and model_code == "seedance-2/video":
             await event.answer(
                 "Seedance поддерживает text-to-video без стартового изображения.",
@@ -493,13 +481,6 @@ async def _send_image_request_screen(
 ) -> None:
     assert _ORIGINAL_SEND_IMAGE_REQUEST_SCREEN is not None
     await _ORIGINAL_SEND_IMAGE_REQUEST_SCREEN(message, context, state)
-    await message.answer(
-        "Все три image-модели поддерживают text-to-image без референса.",
-        reply_markup=_single_callback_keyboard(
-            "Продолжить без референса",
-            "image:no_reference",
-        ),
-    )
 
 
 def _generation_limits_payload(user: User, model: Any) -> dict[str, Any]:

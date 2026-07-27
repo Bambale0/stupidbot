@@ -217,6 +217,7 @@ def _check_source_contracts() -> None:
     core_source = Path("app/plugins/core/plugin.py").read_text(encoding="utf-8")
     finance_source = Path("app/plugins/finance/plugin.py").read_text(encoding="utf-8")
     payments_source = Path("app/plugins/payments/plugin.py").read_text(encoding="utf-8")
+    model_contracts_source = Path("app/services/model_contracts.py").read_text(encoding="utf-8")
 
     assert "increment_feed_share" not in feed_source
     assert 'text=f"Share' not in feed_source
@@ -227,6 +228,8 @@ def _check_source_contracts() -> None:
     assert "_install_admin_finance_button" not in finance_source
     assert 'F.data.startswith("pay:create:")' in payments_source
     assert 'F.data.startswith("pay:package:")' in payments_source
+    assert "Продолжить без референса" not in model_contracts_source
+    assert "Все три image-модели поддерживают text-to-image без референса" not in model_contracts_source
 
     ux_plugin._install_generation_navigation()
     ux_plugin._install_generation_status_after_prompt()
