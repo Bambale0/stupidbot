@@ -22,6 +22,7 @@ def main() -> None:
         "branches: [main, master]",
         "actions: read",
         "issues: write",
+        "pull-requests: write",
         "ref: ${{ env.CANDIDATE_SHA }}",
         "ops/certify_release.sh",
         "release-certificate-${{ env.CANDIDATE_SHA }}",
