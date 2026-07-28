@@ -32,11 +32,13 @@ from app.services.telegram_feed_links import (
     install_http_telegram_feed_config_route,
     install_telegram_feed_links_patch,
 )
+from app.services.tma_request_integrity import install_tma_request_integrity
 
 install_repository_patches()
 install_model_repository_contracts()
 install_kie_image_contract()
 install_package_policy()
+install_tma_request_integrity()
 install_http_readiness_route()
 install_http_telegram_feed_config_route()
 
