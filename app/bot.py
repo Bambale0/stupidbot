@@ -26,6 +26,7 @@ from app.services.model_contracts import (
     install_kie_image_contract,
     install_model_repository_contracts,
 )
+from app.services.operations_metrics import install_operations_metrics_route
 from app.services.package_policy import install_package_policy
 from app.services.referrals import install_repository_patches
 from app.services.telegram_feed_links import (
@@ -40,6 +41,7 @@ install_kie_image_contract()
 install_package_policy()
 install_tma_request_integrity()
 install_http_readiness_route()
+install_operations_metrics_route()
 install_http_telegram_feed_config_route()
 
 from app.plugins.loader import load_plugins  # noqa: E402
