@@ -30,10 +30,17 @@ async def amain() -> None:
         ready = await client.get("/ready")
         ready.raise_for_status()
         ready_payload = ready.json()
-        assert ready_payload == {
-            "status": "ready",
-            "checks": {"database": "ok", "redis": "ok", "tracker": "ok"},
+        assert ready_payload.get("status") == "ready"
+        assert ready_payload.get("checks") == {
+            "database": "ok",
+            "redis": "ok",
+            "telegram": "ok",
+            "tracker": "ok",
         }
+        latency_ms = ready_payload.get("latency_ms")
+        assert isinstance(latency_ms, dict)
+        assert set(latency_ms) == {"database", "redis", "telegram", "tracker"}
+        assert all(int(value) >= 0 for value in latency_ms.values())
 
         miniapp = await client.get(f"{miniapp_path}/")
         miniapp.raise_for_status()
@@ -55,11 +62,11 @@ async def amain() -> None:
         payload = packages.json()
         assert isinstance(payload.get("items"), list)
         for package in payload["items"]:
-            assert float(package.get("price_rub") or 0) >= 0
+            assert float(package.get("price_rub") or 0) > 0
             assert not bool(package.get("is_unlimited"))
 
     print(
-        "staging public smoke passed: liveness, readiness, Mini App runtime and backend packages"
+        "staging public smoke passed: liveness, full readiness, Mini App runtime and backend packages"
     )
 
 

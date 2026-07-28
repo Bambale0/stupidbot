@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     host: str = "0.0.0.0"
     port: int = 8000
+    operations_token: str | None = None
 
     telegram_bot_token: str = ""
     telegram_secret_token: str | None = None

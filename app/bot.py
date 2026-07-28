@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 
 from app.config import Settings
 from app.context import AppContext
+from app.operations import install_http_operations_routes
 from app.readiness import install_http_readiness_route
 from app.services.admin_hardening import (
     install_admin_hardening_patch,
@@ -39,6 +40,7 @@ install_model_repository_contracts()
 install_kie_image_contract()
 install_package_policy()
 install_tma_request_integrity()
+install_http_operations_routes()
 install_http_readiness_route()
 install_http_telegram_feed_config_route()
 
