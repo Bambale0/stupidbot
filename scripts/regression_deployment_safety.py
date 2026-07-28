@@ -69,14 +69,26 @@ def check_rollout() -> None:
 
 def check_staging_evidence() -> None:
     workflow = _read(".github/workflows/staging-rollout.yml")
-    assert "Verify public liveness and readiness" in workflow
-    assert "Verify public Mini App and package API" in workflow
+    assert "Probe public liveness and readiness from GitHub runner" in workflow
+    assert "Probe public Mini App and package API from GitHub runner" in workflow
+    assert workflow.count("continue-on-error: true") >= 2
     assert "Create exact-SHA staging evidence" in workflow
     assert "staging-evidence.json" in workflow
     assert "retention-days: 90" in workflow
     assert "Full readiness/Mini App/package API gate" in workflow
     assert ".checks.telegram == \"ok\"" in workflow
     assert "all(.items[]; ((.price_rub | tonumber) > 0))" in workflow
+    for marker in (
+        "Database restore verification: passed",
+        "Runtime dependency readiness: passed",
+        "HTTP readiness endpoint: passed",
+        "Public Mini App smoke: passed",
+        "Automated staging rollout passed",
+    ):
+        assert f"grep -q '{marker}' staging-rollout.log" in workflow
+    assert "authoritative gate runs from the deployed staging host" in workflow
+    assert "github_runner_runtime_probe" in workflow
+    assert "github_runner_product_probe" in workflow
 
 
 def check_http_readiness_contract() -> None:
