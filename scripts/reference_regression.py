@@ -184,7 +184,12 @@ def main() -> None:
         "gallery",
         "ux",
     ]
-    assert normalized_plugin_names(["core", "admin", "ux"]) == ["core", "admin", "ux"]
+    assert normalized_plugin_names(["core", "admin", "ux"]) == [
+        "core",
+        "admin_finance",
+        "admin",
+        "ux",
+    ]
 
     image_model = GenerationModel(
         code="nano-banana-2",
