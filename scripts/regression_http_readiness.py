@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 
 if __package__ in {None, ""}:
     from _bootstrap import add_project_root_to_path
@@ -65,6 +66,20 @@ class _Redis:
         return self.value
 
 
+class _Bot:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+
+    async def get_me(self):
+        if self.fail:
+            raise RuntimeError("telegram unavailable")
+        return SimpleNamespace(id=42, username="stupidbot_test")
+
+
+def _response_payload(response) -> dict:
+    return json.loads(bytes(response.body).decode("utf-8"))
+
+
 async def amain() -> None:
     install_http_readiness_route()
     install_http_readiness_route()
@@ -76,28 +91,46 @@ async def amain() -> None:
     tracker = SimpleNamespace(_task=background, _stop=stop_event)
     assert tracker_is_running(tracker)
 
-    ready = await readiness_payload(engine=_Engine(), redis=_Redis(), tracker=tracker)
-    assert ready == {
-        "status": "ready",
-        "checks": {"database": "ok", "redis": "ok", "tracker": "ok"},
+    ready = await readiness_payload(
+        engine=_Engine(),
+        redis=_Redis(),
+        bot=_Bot(),
+        tracker=tracker,
+    )
+    assert ready["status"] == "ready"
+    assert ready["checks"] == {
+        "database": "ok",
+        "redis": "ok",
+        "telegram": "ok",
+        "tracker": "ok",
     }
+    assert set(ready["latency_ms"]) == {"database", "redis", "telegram", "tracker"}
 
     request = SimpleNamespace(
         app=SimpleNamespace(
-            state=SimpleNamespace(engine=_Engine(), redis=_Redis(), tracker=tracker)
+            state=SimpleNamespace(
+                engine=_Engine(),
+                redis=_Redis(),
+                bot=_Bot(),
+                tracker=tracker,
+            )
         )
     )
-    assert await readiness_response(request) == ready
+    ready_response = await readiness_response(request)
+    assert ready_response.status_code == 200
+    assert _response_payload(ready_response)["checks"] == ready["checks"]
 
     failed = await readiness_payload(
         engine=_Engine(fail=True),
         redis=_Redis(fail=True),
+        bot=_Bot(fail=True),
         tracker=SimpleNamespace(_task=None, _stop=asyncio.Event()),
     )
     assert failed["status"] == "not_ready"
     assert failed["checks"] == {
         "database": "error",
         "redis": "error",
+        "telegram": "error",
         "tracker": "error",
     }
 
@@ -106,17 +139,14 @@ async def amain() -> None:
             state=SimpleNamespace(
                 engine=_Engine(fail=True),
                 redis=_Redis(),
+                bot=_Bot(),
                 tracker=tracker,
             )
         )
     )
-    try:
-        await readiness_response(failed_request)
-    except HTTPException as exc:
-        assert exc.status_code == 503
-        assert exc.detail["status"] == "not_ready"
-    else:
-        raise AssertionError("readiness_response accepted a failed dependency")
+    failed_response = await readiness_response(failed_request)
+    assert failed_response.status_code == 503
+    assert _response_payload(failed_response)["status"] == "not_ready"
 
     stop_event.set()
     await background
