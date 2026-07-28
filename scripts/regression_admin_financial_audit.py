@@ -147,6 +147,10 @@ async def run_admin_financial_audit_regression(
     assert not duplicate_ok
     assert customer.common_credit_debt == 5
 
+    # The production handlers leave session_scope before notifying the user,
+    # which commits the transaction. This explicit flush mirrors that boundary
+    # inside the shared rollback-only regression transaction.
+    await session.flush()
     reverse_entry = await session.scalar(
         select(CreditLedgerEntry).where(
             CreditLedgerEntry.operation_key == f"audit-reverse-{suffix}:common"
