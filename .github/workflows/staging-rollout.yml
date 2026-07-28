@@ -150,13 +150,70 @@ jobs:
           ./staging_rollout.sh "${app_dir}" "${release_sha}"
           REMOTE
 
-      - name: Verify public health
+      - name: Verify public liveness and readiness
         shell: bash
         run: |
           set -Eeuo pipefail
-          response=$(curl --fail --silent --show-error --max-time 15 \
+          health=$(curl --fail --silent --show-error --max-time 15 \
             https://stupid.chillcreative.ru/health)
-          [[ "${response}" == *'"status":"ok"'* || "${response}" == *'"status": "ok"'* ]]
+          jq -e '.status == "ok"' <<<"${health}" >/dev/null
+
+          ready=$(curl --fail --silent --show-error --max-time 20 \
+            https://stupid.chillcreative.ru/ready)
+          jq -e '
+            .status == "ready"
+            and .checks.database == "ok"
+            and .checks.redis == "ok"
+            and .checks.telegram == "ok"
+            and .checks.tracker == "ok"
+          ' <<<"${ready}" >/dev/null
+
+      - name: Verify public Mini App and package API
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          miniapp=$(curl --fail --silent --show-error --max-time 15 \
+            https://stupid.chillcreative.ru/miniapp/)
+          [[ "${miniapp}" == *"runtime-sync.js"* ]]
+
+          packages=$(curl --fail --silent --show-error --max-time 15 \
+            https://stupid.chillcreative.ru/api/tma/app/packages)
+          jq -e '
+            (.items | type == "array")
+            and all(.items[]; ((.price_rub | tonumber) > 0))
+          ' <<<"${packages}" >/dev/null
+
+      - name: Create exact-SHA staging evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -q 'Automated staging rollout passed' staging-rollout.log
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg sha "${GITHUB_SHA}" \
+            --arg branch "${GITHUB_REF_NAME}" \
+            --arg run_url "${run_url}" \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              schema_version: 1,
+              repository: $repository,
+              candidate_sha: $sha,
+              branch: $branch,
+              created_at: $created_at,
+              status: "passed",
+              checks: {
+                backup: "passed",
+                migration: "passed",
+                restart: "passed",
+                database_restore: "passed",
+                liveness: "passed",
+                readiness: "passed",
+                mini_app: "passed",
+                package_api: "passed"
+              },
+              evidence: $run_url
+            }' > staging-evidence.json
 
       - name: Upload rollout evidence
         if: always()
@@ -165,9 +222,10 @@ jobs:
           name: stupidbot-staging-rollout-${{ github.sha }}
           path: |
             staging-rollout.log
+            staging-evidence.json
             stupidbot-source.tar.gz.sha256
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
 
       - name: Publish rollout status
         if: always()
@@ -178,8 +236,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           automated_gate=failed
-          if [[ -f staging-rollout.log ]] \
-            && grep -q 'Automated staging rollout passed' staging-rollout.log; then
+          if [[ -f staging-evidence.json ]] \
+            && jq -e '.status == "passed" and .candidate_sha == env.GITHUB_SHA' staging-evidence.json >/dev/null; then
             automated_gate=passed
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -190,6 +248,7 @@ jobs:
           - Branch: \`${GITHUB_REF_NAME}\`
           - GitHub job status: \`${JOB_STATUS}\`
           - Backup/migration/restart/health gate: \`${automated_gate}\`
+          - Full readiness/Mini App/package API gate: \`${automated_gate}\`
           - Run: ${run_url}
 
           Evidence is stored in the workflow artifact. Secret values are not included.
