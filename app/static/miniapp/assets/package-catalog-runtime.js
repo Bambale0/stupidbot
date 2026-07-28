@@ -6,6 +6,7 @@ const telegramApp = window.Telegram?.WebApp || null;
 let packages = [];
 let selectedPackageId = "";
 let confirmedSignature = "";
+let paymentAttemptKey = "";
 let loading = false;
 let paymentLoading = false;
 let statusMessage = "";
@@ -97,6 +98,20 @@ function packageSignature(item) {
   ]);
 }
 
+function newIdempotencyKey() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  const random = new Uint8Array(18);
+  window.crypto?.getRandomValues?.(random);
+  const entropy = Array.from(random, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `pay_${Date.now().toString(36)}_${entropy || Math.random().toString(36).slice(2)}`;
+}
+
+function resetPaymentAttempt() {
+  paymentAttemptKey = newIdempotencyKey();
+}
+
 function packageSection() {
   return root?.querySelector(".tariff-list") || null;
 }
@@ -134,6 +149,7 @@ function renderPackageCatalog() {
   if (selected && selected.id !== selectedPackageId) {
     selectedPackageId = selected.id;
     confirmedSignature = packageSignature(selected);
+    resetPaymentAttempt();
   }
 
   section.dataset.dynamicPackageCatalog = "1";
@@ -192,6 +208,9 @@ async function fetchPackageCatalog({ forPayment = false, notifyChanges = false }
     if (!confirmedSignature || !changed || !forPayment) {
       confirmedSignature = currentSignature;
     }
+    if (changed) {
+      resetPaymentAttempt();
+    }
     if (changed && notifyChanges) {
       statusMessage = "Тариф обновлён администратором. Проверьте новую цену и состав.";
     }
@@ -206,7 +225,11 @@ async function fetchPackageCatalog({ forPayment = false, notifyChanges = false }
 }
 
 function authHeaders() {
-  const headers = { Accept: "application/json", "Content-Type": "application/json" };
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Idempotency-Key": paymentAttemptKey || newIdempotencyKey(),
+  };
   const initData = telegramApp?.initData || "";
   if (initData) {
     headers["X-Telegram-Init-Data"] = initData;
@@ -236,10 +259,12 @@ async function createSelectedPackagePayment() {
   }
   if (refreshed.changed) {
     confirmedSignature = packageSignature(refreshed.package);
+    resetPaymentAttempt();
     setStatus("Цена или состав изменились. Проверьте тариф и нажмите оплатить ещё раз.");
     return;
   }
 
+  if (!paymentAttemptKey) resetPaymentAttempt();
   paymentLoading = true;
   statusMessage = "";
   renderPackageCatalog();
@@ -254,7 +279,14 @@ async function createSelectedPackagePayment() {
     if (!response.ok) {
       if (response.status === 404) {
         await fetchPackageCatalog({ notifyChanges: true });
+        resetPaymentAttempt();
         throw new Error("package_unavailable");
+      }
+      if (response.status === 409) {
+        throw new Error("payment_in_progress");
+      }
+      if (response.status === 429) {
+        throw new Error("payment_rate_limited");
       }
       throw new Error(String(payload.detail || "payment_failed"));
     }
@@ -268,9 +300,15 @@ async function createSelectedPackagePayment() {
       ? "Заявка создана. Администратор подтвердит оплату."
       : "Платёж создан, но ссылка не вернулась.";
   } catch (error) {
-    statusMessage = error instanceof Error && error.message === "package_unavailable"
-      ? "Пакет изменён или выключен. Выберите актуальный тариф."
-      : "Не удалось создать оплату. Попробуйте позже.";
+    if (error instanceof Error && error.message === "package_unavailable") {
+      statusMessage = "Пакет изменён или выключен. Выберите актуальный тариф.";
+    } else if (error instanceof Error && error.message === "payment_in_progress") {
+      statusMessage = "Этот платёж уже создаётся. Не нажимайте повторно.";
+    } else if (error instanceof Error && error.message === "payment_rate_limited") {
+      statusMessage = "Слишком много попыток оплаты. Повторите через минуту.";
+    } else {
+      statusMessage = "Не удалось создать оплату. Попробуйте позже.";
+    }
   } finally {
     paymentLoading = false;
     renderPackageCatalog();
@@ -314,6 +352,7 @@ root?.addEventListener("click", (event) => {
     event.stopImmediatePropagation();
     selectedPackageId = String(tariff.getAttribute("data-tariff") || "");
     confirmedSignature = packageSignature(packages.find((item) => item.id === selectedPackageId));
+    resetPaymentAttempt();
     statusMessage = "";
     renderPackageCatalog();
     return;
@@ -352,4 +391,5 @@ window.addEventListener("focus", () => {
   if (packagesVisible()) schedulePackageRefresh({ notifyChanges: true });
 });
 
+resetPaymentAttempt();
 schedulePackageRefresh();
