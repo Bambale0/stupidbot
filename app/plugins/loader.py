@@ -25,6 +25,9 @@ def normalized_plugin_names(configured: list[str]) -> list[str]:
     if "generation" in plugins and "references" not in plugins:
         plugins.insert(plugins.index("generation") + 1, "references")
 
+    if "admin" in plugins and "admin_finance" not in plugins:
+        plugins.insert(plugins.index("admin"), "admin_finance")
+
     if "ux" in plugins:
         plugins = [name for name in plugins if name != "ux"]
         plugins.append("ux")
