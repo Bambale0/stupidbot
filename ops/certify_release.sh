@@ -6,8 +6,9 @@ sha=${2:?candidate SHA is required}
 pr_number=${3:?release pull request number is required}
 staging_issue=${4:-17}
 output=${5:-release-evidence.json}
-attempts=${RELEASE_CERTIFICATION_ATTEMPTS:-80}
+timeout_seconds=${RELEASE_CERTIFICATION_TIMEOUT_SECONDS:-1200}
 sleep_seconds=${RELEASE_CERTIFICATION_SLEEP_SECONDS:-15}
+deadline=$((SECONDS + timeout_seconds))
 
 if [[ ! "${sha}" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Candidate SHA must be a full 40-character lowercase commit SHA" >&2
@@ -17,14 +18,22 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
   echo "GH_TOKEN is required" >&2
   exit 2
 fi
+if (( timeout_seconds < 60 )); then
+  echo "RELEASE_CERTIFICATION_TIMEOUT_SECONDS must be at least 60" >&2
+  exit 2
+fi
+if (( sleep_seconds < 1 )); then
+  echo "RELEASE_CERTIFICATION_SLEEP_SECONDS must be positive" >&2
+  exit 2
+fi
 command -v gh >/dev/null
 command -v jq >/dev/null
 
 workflow_names=("CI" "Release contracts" "Financial integrity")
 declare -A workflow_urls=()
-certified=0
+workflow_evidence_ready=0
 
-for attempt in $(seq 1 "${attempts}"); do
+while (( SECONDS < deadline )); do
   runs_json=$(gh api --method GET "repos/${repo}/actions/runs" \
     -f head_sha="${sha}" \
     -f per_page=100)
@@ -60,21 +69,20 @@ for attempt in $(seq 1 "${attempts}"); do
   done
 
   if (( pending == 0 )); then
-    certified=1
+    workflow_evidence_ready=1
+    echo "Exact-SHA CI, Release contracts and Financial integrity evidence is ready"
     break
   fi
-  if (( attempt == attempts )); then
-    break
-  fi
+  echo "Waiting for exact-SHA workflow evidence for ${sha}"
   sleep "${sleep_seconds}"
 done
 
-if (( certified == 0 )); then
+if (( workflow_evidence_ready == 0 )); then
   echo "Timed out waiting for exact-SHA workflow evidence for ${sha}" >&2
   exit 1
 fi
 
-staging_url=$(
+find_staging_url() {
   gh api --paginate "repos/${repo}/issues/${staging_issue}/comments?per_page=100" \
     | jq -r --arg sha "${sha}" '
         .[]
@@ -82,13 +90,25 @@ staging_url=$(
         | select((.body // "") | contains("## Staging rollout: passed"))
         | select((.body // "") | contains("GitHub job status: `success`"))
         | select((.body // "") | contains("Backup/migration/restart/health gate: `passed`"))
+        | select((.body // "") | contains("Full readiness/Mini App/package API gate: `passed`"))
         | .html_url
       ' \
     | tail -1
-)
+}
+
+staging_url=""
+while (( SECONDS < deadline )); do
+  staging_url=$(find_staging_url)
+  if [[ -n "${staging_url}" ]]; then
+    echo "Exact-SHA staging evidence is ready"
+    break
+  fi
+  echo "Waiting for exact-SHA staging evidence for ${sha}"
+  sleep "${sleep_seconds}"
+done
 
 if [[ -z "${staging_url}" ]]; then
-  echo "Exact-SHA successful staging evidence was not found for ${sha}" >&2
+  echo "Timed out waiting for exact-SHA successful staging evidence for ${sha}" >&2
   exit 1
 fi
 
