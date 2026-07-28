@@ -26,6 +26,7 @@ from app.services.model_contracts import (
     install_kie_image_contract,
     install_model_repository_contracts,
 )
+from app.services.package_policy import install_package_policy
 from app.services.referrals import install_repository_patches
 from app.services.telegram_feed_links import (
     install_http_telegram_feed_config_route,
@@ -35,6 +36,7 @@ from app.services.telegram_feed_links import (
 install_repository_patches()
 install_model_repository_contracts()
 install_kie_image_contract()
+install_package_policy()
 install_http_readiness_route()
 install_http_telegram_feed_config_route()
 
