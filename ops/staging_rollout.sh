@@ -15,6 +15,7 @@ db_backup="${backup_dir}/postgres.dump"
 restore_root="${release_root}/rollback-${release_sha}"
 mutation_started=0
 local_health_passed=0
+local_readiness_passed=0
 rollout_succeeded=0
 
 run_root() {
@@ -145,6 +146,7 @@ python3 -m compileall -q "${candidate}/app" "${candidate}/scripts"
   python3 scripts/regression_deployment_safety.py
   python3 scripts/regression_bot_ux.py
   python3 scripts/regression_gallery_compat.py
+  python3 scripts/regression_operations_readiness.py
   python3 scripts/runtime_readiness.py
 )
 chmod 700 "${candidate}/ops/verify_postgres_restore.sh"
@@ -166,6 +168,7 @@ python3 -m scripts.init_db
 python3 scripts/regression_deployment_safety.py
 python3 scripts/regression_bot_ux.py
 python3 scripts/regression_gallery_compat.py
+python3 scripts/regression_operations_readiness.py
 python3 scripts/runtime_readiness.py
 python3 scripts/admin_smoke.py
 python3 scripts/regression_500_current.py
@@ -182,9 +185,33 @@ for attempt in $(seq 1 20); do
   fi
   sleep 2
 done
-
 if (( local_health_passed == 0 )); then
   echo "Health check failed: ${health_url}" >&2
+  exit 1
+fi
+
+readiness_url=${STUPIDBOT_LOCAL_READINESS_URL:-http://127.0.0.1:8092/ready}
+for attempt in $(seq 1 20); do
+  if response=$(curl --fail --silent --show-error --max-time 10 "${readiness_url}") \
+    && READY_RESPONSE="${response}" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ["READY_RESPONSE"])
+checks = payload.get("checks") or {}
+required = {"database", "redis", "telegram", "tracker"}
+valid = payload.get("status") == "ready" and required.issubset(checks) and all(
+    checks[name] == "ok" for name in required
+)
+raise SystemExit(0 if valid else 1)
+PY
+  then
+    local_readiness_passed=1
+    break
+  fi
+  sleep 2
+done
+if (( local_readiness_passed == 0 )); then
+  echo "Readiness check failed: ${readiness_url}" >&2
   exit 1
 fi
 
@@ -197,7 +224,8 @@ journalctl -u "${service_name}" --since "5 minutes ago" --no-pager --lines=100 \
 echo "Backup directory: ${backup_dir}"
 echo "Database restore verification: passed"
 echo "Deployment safety regression: passed"
-echo "Runtime readiness: passed"
+echo "Runtime dependency readiness: passed"
+echo "HTTP readiness endpoint: passed"
 echo "Bot UX regression: passed"
 echo "Transactional financial smoke: passed"
 echo "Public Mini App smoke: passed"
