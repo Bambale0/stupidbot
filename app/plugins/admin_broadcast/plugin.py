@@ -8,6 +8,7 @@ from html import escape
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -16,6 +17,7 @@ from sqlalchemy import func, select
 from app.context import AppContext
 from app.db import session_scope
 from app.models import Broadcast, User
+from app.plugins.admin.plugin import AdminStates, _cancel_keyboard
 from app.plugins.common import ensure_user_for_callback, ensure_user_for_message, is_admin_user
 
 logger = logging.getLogger(__name__)
@@ -57,11 +59,15 @@ def _broadcast_keyboard(item: Broadcast) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+async def _safe_answer(callback: CallbackQuery, *args, **kwargs) -> None:
+    with suppress(TelegramBadRequest):
+        await callback.answer(*args, **kwargs)
+
+
 async def _require_admin_callback(callback: CallbackQuery, context: AppContext) -> bool:
     user = await ensure_user_for_callback(callback, context)
     if not is_admin_user(user, context):
-        with suppress(TelegramBadRequest):
-            await callback.answer("Нет доступа", show_alert=True)
+        await _safe_answer(callback, "Нет доступа", show_alert=True)
         return False
     return True
 
@@ -72,11 +78,6 @@ async def _require_admin_message(message: Message, context: AppContext):
         await message.answer("Нет доступа.")
         return None
     return user
-
-
-async def _safe_answer(callback: CallbackQuery, *args, **kwargs) -> None:
-    with suppress(TelegramBadRequest):
-        await callback.answer(*args, **kwargs)
 
 
 @router.callback_query(F.data == "admin:broadcast")
@@ -111,8 +112,6 @@ async def broadcast_list(callback: CallbackQuery, context: AppContext, state: FS
 async def broadcast_new(callback: CallbackQuery, context: AppContext, state: FSMContext) -> None:
     if not await _require_admin_callback(callback, context):
         return
-    from app.plugins.admin.plugin import AdminStates, _cancel_keyboard
-
     await state.set_state(AdminStates.broadcast_text)
     if callback.message:
         await callback.message.answer(
@@ -122,7 +121,7 @@ async def broadcast_new(callback: CallbackQuery, context: AppContext, state: FSM
     await _safe_answer(callback)
 
 
-@router.message(F.state == "AdminStates:broadcast_text", F.text)
+@router.message(StateFilter(AdminStates.broadcast_text), F.text)
 async def broadcast_text(message: Message, context: AppContext, state: FSMContext) -> None:
     admin = await _require_admin_message(message, context)
     if not admin:
@@ -174,7 +173,7 @@ async def broadcast_send(
     await state.clear()
     if callback.message:
         await callback.message.answer(
-            f"Рассылка #{broadcast_id} запущена. Прогресс можно посмотреть в разделе «Рассылки».",
+            f"Рассылка #{broadcast_id} запущена. Прогресс доступен в разделе «Рассылки».",
             reply_markup=_admin_keyboard(),
         )
     await _safe_answer(callback)
@@ -305,19 +304,17 @@ async def _run_broadcast(context: AppContext, bot: Bot, broadcast_id: int) -> No
         failure_key = _failure_key(broadcast_id)
         sent = int(await context.redis.scard(sent_key) or 0)
         failed = int(await context.redis.hlen(failure_key) or 0)
-        await _persist_progress(
-            context, broadcast_id, status="sending", sent=sent, failed=failed
-        )
+        await _persist_progress(context, broadcast_id, status="sending", sent=sent, failed=failed)
         processed_since_update = 0
         for user in users:
             if await context.redis.sismember(sent_key, str(user.id)):
                 continue
             try:
                 await bot.send_message(user.telegram_id, item.text, parse_mode=None)
-            except Exception as exc:  # delivery errors are isolated per recipient
-                failed += 1
+            except Exception as exc:  # isolate each recipient failure
                 error_name = type(exc).__name__
                 await context.redis.hset(failure_key, str(user.id), error_name)
+                failed = int(await context.redis.hlen(failure_key) or 0)
                 logger.warning(
                     "broadcast_delivery_failed broadcast_id=%s user_id=%s error=%s",
                     broadcast_id,
@@ -325,9 +322,10 @@ async def _run_broadcast(context: AppContext, bot: Bot, broadcast_id: int) -> No
                     error_name,
                 )
             else:
-                sent += 1
                 await context.redis.sadd(sent_key, str(user.id))
                 await context.redis.hdel(failure_key, str(user.id))
+                sent = int(await context.redis.scard(sent_key) or 0)
+                failed = int(await context.redis.hlen(failure_key) or 0)
             processed_since_update += 1
             if processed_since_update >= PROGRESS_UPDATE_EVERY:
                 await _persist_progress(
@@ -356,9 +354,7 @@ async def _run_broadcast(context: AppContext, bot: Bot, broadcast_id: int) -> No
         logger.exception("broadcast_run_failed broadcast_id=%s", broadcast_id)
         sent = int(await context.redis.scard(_sent_key(broadcast_id)) or 0)
         failed = int(await context.redis.hlen(_failure_key(broadcast_id)) or 0)
-        await _persist_progress(
-            context, broadcast_id, status="failed", sent=sent, failed=failed
-        )
+        await _persist_progress(context, broadcast_id, status="failed", sent=sent, failed=failed)
     finally:
         await context.redis.delete(lock_key)
 
