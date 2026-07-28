@@ -82,6 +82,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify staging access configuration
+        id: access
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -103,6 +104,7 @@ jobs:
           echo "STAGING_SSH_PORT=${STAGING_SSH_PORT:-22}" >> "${GITHUB_ENV}"
 
       - name: Package immutable candidate
+        id: package
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -113,6 +115,7 @@ jobs:
           sha256sum stupidbot-source.tar.gz > stupidbot-source.tar.gz.sha256
 
       - name: Configure SSH
+        id: ssh
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -123,6 +126,7 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Transfer candidate
+        id: transfer
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -136,6 +140,7 @@ jobs:
             "${remote}:${STAGING_APP_DIR}/.release/"
 
       - name: Backup, migrate and deploy
+        id: deploy
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -151,14 +156,17 @@ jobs:
           REMOTE
 
       - name: Verify public liveness and readiness
+        id: runtime
         shell: bash
         run: |
           set -Eeuo pipefail
-          health=$(curl --fail --silent --show-error --max-time 15 \
+          health=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 15 \
             https://stupid.chillcreative.ru/health)
           jq -e '.status == "ok"' <<<"${health}" >/dev/null
 
-          ready=$(curl --fail --silent --show-error --max-time 20 \
+          ready=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 20 \
             https://stupid.chillcreative.ru/ready)
           jq -e '
             .status == "ready"
@@ -169,14 +177,17 @@ jobs:
           ' <<<"${ready}" >/dev/null
 
       - name: Verify public Mini App and package API
+        id: product
         shell: bash
         run: |
           set -Eeuo pipefail
-          miniapp=$(curl --fail --silent --show-error --max-time 15 \
+          miniapp=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 15 \
             https://stupid.chillcreative.ru/miniapp/)
           [[ "${miniapp}" == *"runtime-sync.js"* ]]
 
-          packages=$(curl --fail --silent --show-error --max-time 15 \
+          packages=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 15 \
             https://stupid.chillcreative.ru/api/tma/app/packages)
           jq -e '
             (.items | type == "array")
@@ -184,6 +195,7 @@ jobs:
           ' <<<"${packages}" >/dev/null
 
       - name: Create exact-SHA staging evidence
+        id: evidence
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -233,6 +245,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_STATUS: ${{ job.status }}
+          ACCESS_OUTCOME: ${{ steps.access.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          SSH_OUTCOME: ${{ steps.ssh.outcome }}
+          TRANSFER_OUTCOME: ${{ steps.transfer.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}
+          PRODUCT_OUTCOME: ${{ steps.product.outcome }}
+          EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
         run: |
           set -Eeuo pipefail
           automated_gate=failed
@@ -247,6 +267,11 @@ jobs:
           - SHA: \`${GITHUB_SHA}\`
           - Branch: \`${GITHUB_REF_NAME}\`
           - GitHub job status: \`${JOB_STATUS}\`
+          - Access/package/SSH: \`${ACCESS_OUTCOME}/${PACKAGE_OUTCOME}/${SSH_OUTCOME}\`
+          - Transfer/deploy: \`${TRANSFER_OUTCOME}/${DEPLOY_OUTCOME}\`
+          - Runtime readiness: \`${RUNTIME_OUTCOME}\`
+          - Mini App/package API: \`${PRODUCT_OUTCOME}\`
+          - Exact-SHA evidence: \`${EVIDENCE_OUTCOME}\`
           - Backup/migration/restart/health gate: \`${automated_gate}\`
           - Full readiness/Mini App/package API gate: \`${automated_gate}\`
           - Run: ${run_url}
