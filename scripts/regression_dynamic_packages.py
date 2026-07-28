@@ -13,9 +13,12 @@ if __package__ in {None, ""}:
 
     add_project_root_to_path()
 
-from app import repositories
-from app.services import payments
-from app.services.package_policy import PACKAGE_CATALOG_PATH
+from app.services.package_policy import PACKAGE_CATALOG_PATH, install_package_policy
+
+install_package_policy()
+
+from app import repositories  # noqa: E402
+from app.services import payments  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,12 +75,14 @@ async def run_dynamic_package_regression() -> None:
     runtime_source = (
         ROOT / "app/static/miniapp/assets/package-catalog-runtime.js"
     ).read_text(encoding="utf-8")
+    bot_source = (ROOT / "app/bot.py").read_text(encoding="utf-8")
     services_init = (ROOT / "app/services/__init__.py").read_text(encoding="utf-8")
 
     app_script = index_source.index("assets/app.js")
     package_script = index_source.index("assets/package-catalog-runtime.js")
     assert app_script < package_script
-    assert "install_package_policy()" in services_init
+    assert "install_package_policy()" in bot_source
+    assert "install_package_policy" not in services_init
     assert 'cache: "no-store"' in runtime_source
     assert 'document.addEventListener("visibilitychange"' in runtime_source
     assert 'window.addEventListener("focus"' in runtime_source
