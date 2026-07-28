@@ -187,6 +187,7 @@ def main() -> None:
     assert normalized_plugin_names(["core", "admin", "ux"]) == [
         "core",
         "admin_finance",
+        "admin_broadcast",
         "admin",
         "ux",
     ]
