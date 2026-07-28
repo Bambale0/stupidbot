@@ -34,15 +34,26 @@ def main() -> None:
         assert f'"{workflow_name}"' in script
     for contract in (
         "^[0-9a-f]{40}$",
+        "RELEASE_CERTIFICATION_TIMEOUT_SECONDS",
+        "deadline=$((SECONDS + timeout_seconds))",
+        "while (( SECONDS < deadline )); do",
+        "Waiting for exact-SHA workflow evidence",
+        "Waiting for exact-SHA staging evidence",
+        "find_staging_url()",
         "## Staging rollout: passed",
         "GitHub job status: `success`",
         "Backup/migration/restart/health gate: `passed`",
+        "Full readiness/Mini App/package API gate: `passed`",
         'status: "certified"',
         "release-certification:${sha}",
         "candidate_sha",
         "staging_rollout",
     ):
         assert contract in script, contract
+
+    assert script.count("while (( SECONDS < deadline )); do") >= 2
+    assert "staging_url=$(find_staging_url)" in script
+    assert "Timed out waiting for exact-SHA successful staging evidence" in script
 
     assert "staging-evidence.json" in staging_workflow
     assert "Full readiness/Mini App/package API gate" in staging_workflow
