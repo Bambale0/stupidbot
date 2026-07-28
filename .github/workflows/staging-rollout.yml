@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate candidate on PostgreSQL
+    name: Validate candidate on PostgreSQL and Redis
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -32,9 +32,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       APP_ENV: ci
       DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/stupidbot_ci
+      REDIS_URL: redis://127.0.0.1:6379/0
       PHOTO_CREDIT_VALUE_KOPECKS: "3900"
       VIDEO_CREDIT_VALUE_KOPECKS: "10000"
       CUSTOM_CREDIT_SALES_ENABLED: "false"
@@ -292,6 +302,38 @@ jobs:
           - Run: ${run_url}
 
           The authoritative gate runs from the deployed staging host while rollback is armed. GitHub-runner probes are retained as network diagnostics only. Evidence is stored in the workflow artifact; secret values are not included.
+          EOF
+          gh issue comment 17 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file rollout-status.md
+
+  report-pre-rollout-failure:
+    name: Report staging validation or scheduling failure
+    needs: [validate, rollout]
+    if: always() && (needs.validate.result != 'success' || needs.rollout.result == 'skipped' || needs.rollout.result == 'cancelled')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish pre-rollout failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          ROLLOUT_RESULT: ${{ needs.rollout.result }}
+        run: |
+          set -Eeuo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          cat > rollout-status.md <<EOF
+          ## Staging rollout: failed
+
+          - SHA: \`${GITHUB_SHA}\`
+          - Branch: \`${GITHUB_REF_NAME}\`
+          - Validation result: \`${VALIDATE_RESULT}\`
+          - Rollout result: \`${ROLLOUT_RESULT}\`
+          - Backup/migration/restart/health gate: \`not_started\`
+          - Full readiness/Mini App/package API gate: \`not_started\`
+          - Run: ${run_url}
+
+          The failure occurred before authoritative staging evidence could be created. No secret values are included.
           EOF
           gh issue comment 17 \
             --repo "${GITHUB_REPOSITORY}" \
