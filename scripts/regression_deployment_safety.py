@@ -31,6 +31,7 @@ def check_financial_workflow() -> None:
     _assert_pipefail_before_tee(workflow, "python scripts/regression_financial.py")
     _assert_pipefail_before_tee(workflow, "python scripts/regression_500_current.py")
     assert "python scripts/regression_deployment_safety.py" in workflow
+    assert "python scripts/regression_operations_readiness.py" in workflow
     assert "python scripts/runtime_readiness.py" in workflow
 
 
@@ -39,12 +40,18 @@ def check_rollout() -> None:
     assert "local_health_passed=0" in rollout
     assert "local_health_passed=1" in rollout
     assert "if (( local_health_passed == 0 )); then" in rollout
+    assert "local_readiness_passed=0" in rollout
+    assert "local_readiness_passed=1" in rollout
+    assert "if (( local_readiness_passed == 0 )); then" in rollout
+    assert "STUPIDBOT_LOCAL_READINESS_URL" in rollout
 
     mutation_index = rollout.index("mutation_started=1")
     candidate_safety_index = rollout.index("python3 scripts/regression_deployment_safety.py")
     candidate_runtime_index = rollout.index("python3 scripts/runtime_readiness.py")
+    candidate_operations_index = rollout.index("python3 scripts/regression_operations_readiness.py")
     assert candidate_safety_index < mutation_index, "candidate safety gate must run before rsync mutation"
     assert candidate_runtime_index < mutation_index, "candidate runtime check must run before rsync mutation"
+    assert candidate_operations_index < mutation_index, "operations contract must run before rsync mutation"
 
     assert rollout.count("python3 scripts/runtime_readiness.py") >= 3
     assert "restart_service\npython3 scripts/runtime_readiness.py" in rollout
@@ -53,20 +60,42 @@ def check_rollout() -> None:
     success_index = rollout.index("rollout_succeeded=1")
     assert public_smoke_index < success_index, "rollback must stay armed through public smoke"
 
+    readiness_index = rollout.index("readiness_url=${STUPIDBOT_LOCAL_READINESS_URL")
+    assert readiness_index < public_smoke_index, "local full readiness must pass before public smoke"
+
     status_index = rollout.index('run_root systemctl status "${service_name}"')
     assert status_index < success_index, "rollback must stay armed through service status verification"
+
+
+def check_staging_evidence() -> None:
+    workflow = _read(".github/workflows/staging-rollout.yml")
+    assert "Verify public liveness and readiness" in workflow
+    assert "Verify public Mini App and package API" in workflow
+    assert "Create exact-SHA staging evidence" in workflow
+    assert "staging-evidence.json" in workflow
+    assert "retention-days: 90" in workflow
+    assert "Full readiness/Mini App/package API gate" in workflow
+    assert ".checks.telegram == \"ok\"" in workflow
+    assert "all(.items[]; ((.price_rub | tonumber) > 0))" in workflow
 
 
 def check_http_readiness_contract() -> None:
     bot_source = _read("app/bot.py")
     readiness_source = _read("app/readiness.py")
+    operations_source = _read("app/operations.py")
     public_smoke = _read("scripts/staging_issue3_public_smoke.py")
     assert "install_http_readiness_route()" in bot_source
+    assert "install_http_operations_routes()" in bot_source
     assert '"/ready"' in readiness_source
     assert "request.app.state.engine" in readiness_source
     assert "request.app.state.redis" in readiness_source
+    assert "request.app.state.bot" in readiness_source or 'getattr(request.app.state, "bot"' in readiness_source
     assert "request.app.state.tracker" in readiness_source
+    assert "_check_telegram" in readiness_source
+    assert 'OPERATIONS_METRICS_PATH = "/ops/metrics"' in operations_source
+    assert "hmac.compare_digest(supplied, expected)" in operations_source
     assert 'client.get("/ready")' in public_smoke
+    assert '"telegram": "ok"' in public_smoke
     assert '"tracker": "ok"' in public_smoke
 
 
@@ -74,14 +103,18 @@ def check_default_ci() -> None:
     script = _read("scripts/ci.sh")
     assert "set -euo pipefail" in script
     assert "python3 scripts/regression_deployment_safety.py" in script
+    assert "python3 scripts/regression_release_certification.py" in script
 
 
 if __name__ == "__main__":
     check_financial_workflow()
     check_rollout()
+    check_staging_evidence()
     check_http_readiness_contract()
     check_default_ci()
     from scripts.regression_http_readiness import amain as readiness_regression
+    from scripts.regression_release_certification import main as release_certification_regression
 
     asyncio.run(readiness_regression())
+    release_certification_regression()
     print("Deployment safety regression passed")
