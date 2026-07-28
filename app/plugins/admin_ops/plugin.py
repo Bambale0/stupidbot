@@ -140,13 +140,14 @@ async def broadcast_detail(callback: CallbackQuery, context: AppContext) -> None
         text += "\n\nПоследние ошибки:\n" + "\n".join(failure_lines)
 
     builder = InlineKeyboardBuilder()
-    if broadcast.status in {"interrupted", "failed", "queued", "sending"} and not active:
+    has_resume = broadcast.status in {"interrupted", "failed", "queued", "sending"} and not active
+    if has_resume:
         builder.button(
             text="▶️ Продолжить",
             callback_data=f"admin:broadcast:resume:{broadcast.id}",
         )
     nav_count = add_navigation_buttons(builder, back_callback="admin:broadcast")
-    builder.adjust(*([1] if builder.buttons else []), nav_count)
+    builder.adjust(*([1] if has_resume else []), nav_count)
     if callback.message:
         await callback.message.answer(text, reply_markup=builder.as_markup())
     await admin_plugin._safe_answer(callback)
