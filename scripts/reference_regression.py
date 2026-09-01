@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 if __package__ in {None, ""}:
     from _bootstrap import add_project_root_to_path
@@ -9,7 +10,7 @@ if __package__ in {None, ""}:
     add_project_root_to_path()
 
 from app.models import GenerationModel, GenerationTask, UploadedFile
-from app.plugins.generation.plugin import _repeat_image_state_payload
+from app.plugins.generation.plugin import ImageFlow, _repeat_image_state_payload
 from app.plugins.loader import normalized_plugin_names
 from app.plugins.references.plugin import (
     REFERENCE_LIBRARY_LIMIT,
@@ -24,6 +25,10 @@ from app.plugins.references.plugin import (
     submit_image_from_settings,
 )
 from app.services.model_contract_corrections import _image_settings_keyboard
+from app.services.reference_persistence import (
+    image_reference_continuation_payload,
+    restore_image_reference_continuation,
+)
 from app.ui import model_keyboard
 from scripts.regression_backend_contracts import amain as backend_contract_regression
 
@@ -86,6 +91,82 @@ def _callbacks(markup) -> list[str]:
 
 def _texts(markup) -> list[str]:
     return [str(button.text) for row in markup.inline_keyboard for button in row]
+
+
+class _FakeState:
+    def __init__(self, current_state: Any = None) -> None:
+        self.current_state = current_state
+        self.data: dict[str, Any] = {}
+
+    async def get_state(self) -> Any:
+        return self.current_state
+
+    async def set_state(self, value: Any) -> None:
+        self.current_state = value
+
+    async def update_data(self, **kwargs: Any) -> None:
+        self.data.update(kwargs)
+
+
+async def _continuation_regression() -> None:
+    snapshot = {
+        "model_code": "nano-banana-2",
+        "prompt": "old prompt",
+        "resolution": "4K",
+        "aspect_ratio": "9:16",
+        "output_format": "png",
+        "image_limits": {"max_images": 14},
+        "explicit_model_selected": True,
+        "status_message_id": 777,
+        "image_references": [
+            {
+                "telegram_file_id": "ref-a",
+                "filename": "ref-a.jpg",
+                "mime_type": "image/jpeg",
+                "size": 1024,
+            },
+            {
+                "telegram_file_id": "ref-b",
+                "filename": "ref-b.jpg",
+                "mime_type": "image/jpeg",
+                "size": 2048,
+            },
+        ],
+    }
+    payload = image_reference_continuation_payload(snapshot)
+    assert payload is not None
+    assert payload["prompt"] == ""
+    assert payload["model_code"] == "nano-banana-2"
+    assert payload["resolution"] == "4K"
+    assert payload["aspect_ratio"] == "9:16"
+    assert payload["output_format"] == "png"
+    assert payload["image_file_id"] == "ref-a"
+    assert [item["telegram_file_id"] for item in payload["image_references"]] == [
+        "ref-a",
+        "ref-b",
+    ]
+    assert "status_message_id" not in payload
+
+    cleared_state = _FakeState()
+    restored = await restore_image_reference_continuation(cleared_state, snapshot)  # type: ignore[arg-type]
+    assert restored is True
+    assert cleared_state.current_state == ImageFlow.settings
+    assert cleared_state.data["prompt"] == ""
+    assert cleared_state.data["image_file_id"] == "ref-a"
+
+    newer_state = _FakeState("newer-flow")
+    restored = await restore_image_reference_continuation(newer_state, snapshot)  # type: ignore[arg-type]
+    assert restored is False
+    assert newer_state.current_state == "newer-flow"
+    assert newer_state.data == {}
+
+    empty_state = _FakeState()
+    restored = await restore_image_reference_continuation(  # type: ignore[arg-type]
+        empty_state,
+        {"model_code": "nano-banana-2", "prompt": "text only", "image_references": []},
+    )
+    assert restored is False
+    assert empty_state.current_state is None
 
 
 def main() -> None:
@@ -227,8 +308,15 @@ def main() -> None:
     assert '"prompt": ""' in source
     assert "_reference_button_text" not in source
 
+    persistence_source = Path("app/services/reference_persistence.py").read_text(encoding="utf-8")
+    referrals_source = Path("app/services/referrals.py").read_text(encoding="utf-8")
+    assert "restore_image_reference_continuation" in persistence_source
+    assert "if await state.get_state() is not None" in persistence_source
+    assert "install_reference_persistence_patch()" in referrals_source
+
+    asyncio.run(_continuation_regression())
     asyncio.run(backend_contract_regression())
-    print("Five-card reference carousel and model-specific settings regression passed")
+    print("Five-card reference carousel and persistent-reference continuation regression passed")
 
 
 if __name__ == "__main__":
