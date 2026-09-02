@@ -41,7 +41,7 @@ def check_release_gate() -> None:
     assert "github.ref == 'refs/heads/main'" in deploy, "manual production deploy must be limited to main"
     assert "DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in deploy
     assert '"${DEPLOY_SHA}"' in deploy
-    assert 'git fetch --no-tags --depth=1 origin refs/heads/main' in deploy
+    assert "git fetch --no-tags --depth=1 origin refs/heads/main" in deploy
     assert 'if [[ "${DEPLOY_SHA}" != "${current_main}" ]]; then' in deploy
     assert '"${DEPLOY_APP_DIR}" "${DEPLOY_SHA}"' in deploy
 
@@ -49,19 +49,66 @@ def check_release_gate() -> None:
 def check_financial_workflow() -> None:
     workflow = _read(".github/workflows/financial-integrity.yml")
     assert "workflow_call:" in workflow, "financial CI must be reusable by the release gate"
+    assert "image: postgres:16" in workflow
     assert "image: redis:7-alpine" in workflow, "financial CI must provide Redis"
     assert "REDIS_URL: redis://127.0.0.1:6379/0" in workflow
+    assert "python -m scripts.migrate_db" in workflow
+    assert "python scripts/runtime_readiness.py" in workflow
     _assert_pipefail_before_tee(workflow, "python scripts/regression_financial.py")
     _assert_pipefail_before_tee(workflow, "python scripts/regression_500_current.py")
-    assert "python scripts/regression_deployment_safety.py" in workflow
-    assert "python scripts/runtime_readiness.py" in workflow
+    assert "ops/verify_postgres_restore.sh" in workflow
+
+    duplicated_application_checks = (
+        "regression_deployment_safety.py",
+        "regression_bot_ux.py",
+        "reference_regression.py",
+        "regression_backend_contracts.py",
+        "regression_gallery_compat.py",
+        "regression_telegram_feed_links.py",
+        "regression_model_provider_contracts.py",
+        "regression_model_env_migration.py",
+        "admin_smoke.py",
+    )
+    for check in duplicated_application_checks:
+        assert check not in workflow, f"{check} belongs to Release contracts, not Financial integrity"
 
 
 def check_reusable_workflows() -> None:
     ci = _read(".github/workflows/ci.yml")
     contracts = _read(".github/workflows/release-contracts.yml")
+    financial = _read(".github/workflows/financial-integrity.yml")
+    finance_regression = _read("scripts/regression_financial.py")
     assert "workflow_call:" in ci
     assert "workflow_call:" in contracts
+    assert "permissions:\n  contents: read" in ci
+    assert "permissions:\n  contents: read" in contracts
+    assert "permissions:\n  contents: read" in financial
+
+    contract_checks = (
+        "regression_deployment_safety.py",
+        "regression_bot_ux.py",
+        "reference_regression.py",
+        "regression_backend_contracts.py",
+        "regression_gallery_compat.py",
+        "regression_telegram_feed_links.py",
+        "regression_model_provider_contracts.py",
+        "regression_model_env_migration.py",
+        "admin_smoke.py",
+    )
+    all_layers = ci + contracts + financial
+    for check in contract_checks:
+        assert check in contracts, f"{check} must run in Release contracts"
+        assert all_layers.count(check) == 1, f"{check} must run exactly once in workflow layers"
+
+    assert contracts.count("import scripts.regression_500_current as regression") == 1, "SQLite policy regression must run once"
+    assert financial.count("python scripts/regression_500_current.py") == 1, "PostgreSQL policy regression must run once"
+
+    for duplicated in (
+        "regression_model_env_migration",
+        "regression_model_provider_contracts",
+        "regression_telegram_feed_links",
+    ):
+        assert duplicated not in finance_regression, f"{duplicated} must not be repeated inside financial regression"
 
 
 def check_rollout() -> None:
@@ -102,8 +149,13 @@ def check_http_readiness_contract() -> None:
 
 def check_default_ci() -> None:
     script = _read("scripts/ci.sh")
+    workflow = _read(".github/workflows/ci.yml")
     assert "set -euo pipefail" in script
-    assert "python3 scripts/regression_deployment_safety.py" in script
+    assert "python3 -m compileall -q app scripts" in script
+    assert "python3 -m pip check" in script
+    assert "ruff check --select E9,F63,F7,F82 app scripts" in script
+    assert "TELEGRAM_BOT_TOKEN" not in workflow, "base CI must not carry fake application credentials"
+    assert "DATABASE_URL" not in workflow, "base CI must stay independent of database backends"
 
 
 if __name__ == "__main__":

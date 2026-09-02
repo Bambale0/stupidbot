@@ -4,19 +4,54 @@ on:
   workflow_call:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: release-contracts-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   contracts:
+    name: application contracts
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       APP_ENV: ci
+      LOG_LEVEL: INFO
+      TELEGRAM_BOT_TOKEN: "123456:test-token"
+      TELEGRAM_SET_WEBHOOK: "false"
+      TELEGRAM_BOT_USERNAME: eva_nana_bot
+      TELEGRAM_SECRET_TOKEN: ci-secret
+      PUBLIC_BASE_URL: https://example.com
+      MINI_APP_PATH: /miniapp
+      ADMIN_IDS: "1001"
       DATABASE_URL: sqlite+aiosqlite:///./stupidbot_release_contracts.sqlite3
       AUTO_CREATE_DB: "true"
-      ADMIN_IDS: "1001"
+      COMET_API_KEY: ci-comet-key
+      COMET_BASE_URL: https://api.cometapi.com
+      COMET_CALLBACK_SECRET: ci-comet-secret
+      COMET_IMAGE_SIMPLE_MODEL: gemini-3.1-flash-lite-image
+      COMET_IMAGE_PRO_MODEL: gemini-3-pro-image
+      COMET_IMAGE_2_MODEL: gemini-3.1-flash-image
+      COMET_KLING_2_6_MODEL: kling-v2-6
+      COMET_KLING_3_0_MODEL: kling-v2-master
+      COMET_SEEDANCE_2_MODEL: doubao-seedance-2-0
+      KIE_API_KEY: ci-kie-key
+      KIE_BASE_URL: https://api.kie.ai
+      KIE_UPLOAD_BASE_URL: https://kieai.redpandaai.co
+      KIE_IMAGE_SIMPLE_MODEL: nano-banana-2-lite
+      KIE_IMAGE_PRO_MODEL: nano-banana-pro
+      KIE_IMAGE_2_MODEL: nano-banana-2
+      KIE_KLING_2_6_MODEL: kling-2.6/image-to-video
+      KIE_KLING_3_0_MODEL: kling-3.0/video
+      KIE_KLING_2_6_MOTION_CONTROL_MODEL: kling-2.6/motion-control
+      KIE_KLING_3_0_MOTION_CONTROL_MODEL: kling-3.0/motion-control
+      KIE_SEEDANCE_2_MODEL: bytedance/seedance-2
+      TBANK_TERMINAL_KEY: terminal
+      TBANK_PASSWORD: password
+      TBANK_SUCCESS_URL: https://example.com/payments/success
+      TBANK_FAIL_URL: https://example.com/payments/fail
       ENABLED_PLUGINS: core,generation,gallery,feed,partners,payments,admin
     steps:
       - uses: actions/checkout@v4
@@ -26,8 +61,6 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -q -e ".[dev]"
-      - name: Compile
-        run: python -m compileall -q app scripts
       - name: Deployment safety
         run: python scripts/regression_deployment_safety.py
       - name: Telegram UX
@@ -38,8 +71,15 @@ jobs:
         run: python scripts/regression_backend_contracts.py
       - name: Gallery compatibility
         run: python scripts/regression_gallery_compat.py
+      - name: Telegram feed links
+        run: python scripts/regression_telegram_feed_links.py
+      - name: Model/provider contracts
+        run: python scripts/regression_model_provider_contracts.py
+      - name: Model environment migration
+        run: python scripts/regression_model_env_migration.py
 
   admin-sqlite:
+    name: admin SQLite smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -67,8 +107,10 @@ jobs:
           name: admin-sqlite-log
           path: admin-sqlite.log
           if-no-files-found: error
+          retention-days: 30
 
   broad-sqlite:
+    name: broad SQLite regression
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -96,3 +138,4 @@ jobs:
           name: broad-sqlite-log
           path: broad-sqlite.log
           if-no-files-found: error
+          retention-days: 30
