@@ -77,6 +77,7 @@ def check_reusable_workflows() -> None:
     ci = _read(".github/workflows/ci.yml")
     contracts = _read(".github/workflows/release-contracts.yml")
     financial = _read(".github/workflows/financial-integrity.yml")
+    finance_regression = _read("scripts/regression_financial.py")
     assert "workflow_call:" in ci
     assert "workflow_call:" in contracts
     assert "permissions:\n  contents: read" in ci
@@ -97,10 +98,17 @@ def check_reusable_workflows() -> None:
     all_layers = ci + contracts + financial
     for check in contract_checks:
         assert check in contracts, f"{check} must run in Release contracts"
-        assert all_layers.count(check) == 1, f"{check} must run exactly once in the release gate"
+        assert all_layers.count(check) == 1, f"{check} must run exactly once in workflow layers"
 
-    assert contracts.count("regression_500_current.py") == 1, "SQLite policy regression must run once"
-    assert financial.count("regression_500_current.py") == 1, "PostgreSQL policy regression must run once"
+    assert contracts.count("import scripts.regression_500_current as regression") == 1, "SQLite policy regression must run once"
+    assert financial.count("python scripts/regression_500_current.py") == 1, "PostgreSQL policy regression must run once"
+
+    for duplicated in (
+        "regression_model_env_migration",
+        "regression_model_provider_contracts",
+        "regression_telegram_feed_links",
+    ):
+        assert duplicated not in finance_regression, f"{duplicated} must not be repeated inside financial regression"
 
 
 def check_rollout() -> None:
@@ -145,7 +153,7 @@ def check_default_ci() -> None:
     assert "set -euo pipefail" in script
     assert "python3 -m compileall -q app scripts" in script
     assert "python3 -m pip check" in script
-    assert "ruff check app scripts" in script
+    assert "ruff check --select E9,F63,F7,F82 app scripts" in script
     assert "TELEGRAM_BOT_TOKEN" not in workflow, "base CI must not carry fake application credentials"
     assert "DATABASE_URL" not in workflow, "base CI must stay independent of database backends"
 
