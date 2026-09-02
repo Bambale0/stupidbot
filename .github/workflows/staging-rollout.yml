@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate candidate on PostgreSQL
+    name: Validate candidate on PostgreSQL and Redis
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -32,9 +32,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       APP_ENV: ci
       DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/stupidbot_ci
+      REDIS_URL: redis://127.0.0.1:6379/0
       PHOTO_CREDIT_VALUE_KOPECKS: "3900"
       VIDEO_CREDIT_VALUE_KOPECKS: "10000"
       CUSTOM_CREDIT_SALES_ENABLED: "false"
@@ -75,13 +85,14 @@ jobs:
       STAGING_SSH_PORT: ${{ secrets.STAGING_SSH_PORT }}
       STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
       STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
-      STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+      STAGING_SSH_HOST_FINGERPRINT: SHA256:g2yC4ErjAUcRGnaOYLj/ZgFkJzkn/8w5UvJE/tk9Chg
       STAGING_APP_DIR: /root/stupidbot
     steps:
       - name: Checkout validated candidate
         uses: actions/checkout@v4
 
       - name: Verify staging access configuration
+        id: access
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -90,19 +101,20 @@ jobs:
             STAGING_SSH_HOST \
             STAGING_SSH_USER \
             STAGING_SSH_PRIVATE_KEY \
-            STAGING_SSH_KNOWN_HOSTS
+            STAGING_SSH_HOST_FINGERPRINT
           do
             if [[ -z "${!name:-}" ]]; then
               missing+=("${name}")
             fi
           done
           if (( ${#missing[@]} > 0 )); then
-            printf 'Missing required staging secrets: %s\n' "${missing[*]}" >&2
+            printf 'Missing required staging access values: %s\n' "${missing[*]}" >&2
             exit 78
           fi
           echo "STAGING_SSH_PORT=${STAGING_SSH_PORT:-22}" >> "${GITHUB_ENV}"
 
       - name: Package immutable candidate
+        id: package
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -113,50 +125,159 @@ jobs:
           sha256sum stupidbot-source.tar.gz > stupidbot-source.tar.gz.sha256
 
       - name: Configure SSH
+        id: ssh
         shell: bash
         run: |
           set -Eeuo pipefail
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "${STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+          chmod 700 ops/configure_staging_ssh.sh
+          ops/configure_staging_ssh.sh
 
       - name: Transfer candidate
+        id: transfer
         shell: bash
         run: |
           set -Eeuo pipefail
           remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
-          ssh -p "${STAGING_SSH_PORT}" "${remote}" \
-            "mkdir -p '${STAGING_APP_DIR}/.release'"
-          scp -P "${STAGING_SSH_PORT}" \
-            stupidbot-source.tar.gz \
-            stupidbot-source.tar.gz.sha256 \
-            ops/staging_rollout.sh \
-            "${remote}:${STAGING_APP_DIR}/.release/"
+          release_dir="${STAGING_APP_DIR}/.release"
+          if [[ "${STAGING_SSH_USE_SUDO:-false}" == "true" ]]; then
+            temp_dir="/tmp/stupidbot-release-${GITHUB_SHA}"
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" \
+              "rm -rf '${temp_dir}' && mkdir -p '${temp_dir}'"
+            scp -P "${STAGING_SSH_PORT}" \
+              stupidbot-source.tar.gz \
+              stupidbot-source.tar.gz.sha256 \
+              ops/staging_rollout.sh \
+              "${remote}:${temp_dir}/"
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" \
+              "sudo -n mkdir -p '${release_dir}' && \
+               sudo -n cp '${temp_dir}/stupidbot-source.tar.gz' '${release_dir}/' && \
+               sudo -n cp '${temp_dir}/stupidbot-source.tar.gz.sha256' '${release_dir}/' && \
+               sudo -n cp '${temp_dir}/staging_rollout.sh' '${release_dir}/' && \
+               rm -rf '${temp_dir}'"
+          else
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" \
+              "mkdir -p '${release_dir}'"
+            scp -P "${STAGING_SSH_PORT}" \
+              stupidbot-source.tar.gz \
+              stupidbot-source.tar.gz.sha256 \
+              ops/staging_rollout.sh \
+              "${remote}:${release_dir}/"
+          fi
 
       - name: Backup, migrate and deploy
+        id: deploy
         shell: bash
         run: |
           set -Eeuo pipefail
           remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
-          ssh -p "${STAGING_SSH_PORT}" "${remote}" bash -s -- \
-            "${STAGING_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee staging-rollout.log
-          set -Eeuo pipefail
-          app_dir=$1
-          release_sha=$2
-          cd "${app_dir}/.release"
-          chmod 700 staging_rollout.sh
-          ./staging_rollout.sh "${app_dir}" "${release_sha}"
-          REMOTE
+          if [[ "${STAGING_SSH_USE_SUDO:-false}" == "true" ]]; then
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" sudo -n bash -s -- \
+              "${STAGING_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee staging-rollout.log
+            set -Eeuo pipefail
+            app_dir=$1
+            release_sha=$2
+            cd "${app_dir}/.release"
+            chmod 700 staging_rollout.sh
+            ./staging_rollout.sh "${app_dir}" "${release_sha}"
+            REMOTE
+          else
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" bash -s -- \
+              "${STAGING_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee staging-rollout.log
+            set -Eeuo pipefail
+            app_dir=$1
+            release_sha=$2
+            cd "${app_dir}/.release"
+            chmod 700 staging_rollout.sh
+            ./staging_rollout.sh "${app_dir}" "${release_sha}"
+            REMOTE
+          fi
 
-      - name: Verify public health
+      - name: Probe public liveness and readiness from GitHub runner
+        id: runtime
+        continue-on-error: true
         shell: bash
         run: |
           set -Eeuo pipefail
-          response=$(curl --fail --silent --show-error --max-time 15 \
+          health=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 15 \
             https://stupid.chillcreative.ru/health)
-          [[ "${response}" == *'"status":"ok"'* || "${response}" == *'"status": "ok"'* ]]
+          jq -e '.status == "ok"' <<<"${health}" >/dev/null
+
+          ready=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 20 \
+            https://stupid.chillcreative.ru/ready)
+          jq -e '
+            .status == "ready"
+            and .checks.database == "ok"
+            and .checks.redis == "ok"
+            and .checks.telegram == "ok"
+            and .checks.tracker == "ok"
+          ' <<<"${ready}" >/dev/null
+
+      - name: Probe public Mini App and package API from GitHub runner
+        id: product
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          miniapp=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 15 \
+            https://stupid.chillcreative.ru/miniapp/)
+          [[ "${miniapp}" == *"runtime-sync.js"* ]]
+
+          packages=$(curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --header 'Cache-Control: no-cache' --max-time 15 \
+            https://stupid.chillcreative.ru/api/tma/app/packages)
+          jq -e '
+            (.items | type == "array")
+            and all(.items[]; ((.price_rub | tonumber) > 0))
+          ' <<<"${packages}" >/dev/null
+
+      - name: Create exact-SHA staging evidence
+        id: evidence
+        shell: bash
+        env:
+          RUNNER_RUNTIME_PROBE: ${{ steps.runtime.outcome }}
+          RUNNER_PRODUCT_PROBE: ${{ steps.product.outcome }}
+        run: |
+          set -Eeuo pipefail
+          grep -q 'Database restore verification: passed' staging-rollout.log
+          grep -q 'Runtime dependency readiness: passed' staging-rollout.log
+          grep -q 'HTTP readiness endpoint: passed' staging-rollout.log
+          grep -q 'Public Mini App smoke: passed' staging-rollout.log
+          grep -q 'Automated staging rollout passed' staging-rollout.log
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg sha "${GITHUB_SHA}" \
+            --arg branch "${GITHUB_REF_NAME}" \
+            --arg run_url "${run_url}" \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg runner_runtime_probe "${RUNNER_RUNTIME_PROBE}" \
+            --arg runner_product_probe "${RUNNER_PRODUCT_PROBE}" \
+            '{
+              schema_version: 1,
+              repository: $repository,
+              candidate_sha: $sha,
+              branch: $branch,
+              created_at: $created_at,
+              status: "passed",
+              checks: {
+                backup: "passed",
+                migration: "passed",
+                restart: "passed",
+                database_restore: "passed",
+                liveness: "passed",
+                readiness: "passed",
+                mini_app: "passed",
+                package_api: "passed"
+              },
+              diagnostics: {
+                github_runner_runtime_probe: $runner_runtime_probe,
+                github_runner_product_probe: $runner_product_probe
+              },
+              evidence: $run_url
+            }' > staging-evidence.json
 
       - name: Upload rollout evidence
         if: always()
@@ -165,9 +286,10 @@ jobs:
           name: stupidbot-staging-rollout-${{ github.sha }}
           path: |
             staging-rollout.log
+            staging-evidence.json
             stupidbot-source.tar.gz.sha256
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
 
       - name: Publish rollout status
         if: always()
@@ -175,11 +297,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_STATUS: ${{ job.status }}
+          ACCESS_OUTCOME: ${{ steps.access.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          SSH_OUTCOME: ${{ steps.ssh.outcome }}
+          TRANSFER_OUTCOME: ${{ steps.transfer.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}
+          PRODUCT_OUTCOME: ${{ steps.product.outcome }}
+          EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
         run: |
           set -Eeuo pipefail
           automated_gate=failed
-          if [[ -f staging-rollout.log ]] \
-            && grep -q 'Automated staging rollout passed' staging-rollout.log; then
+          if [[ -f staging-evidence.json ]] \
+            && jq -e '.status == "passed" and .candidate_sha == env.GITHUB_SHA' staging-evidence.json >/dev/null; then
             automated_gate=passed
           fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -189,10 +319,48 @@ jobs:
           - SHA: \`${GITHUB_SHA}\`
           - Branch: \`${GITHUB_REF_NAME}\`
           - GitHub job status: \`${JOB_STATUS}\`
+          - Access/package/SSH: \`${ACCESS_OUTCOME}/${PACKAGE_OUTCOME}/${SSH_OUTCOME}\`
+          - Transfer/deploy: \`${TRANSFER_OUTCOME}/${DEPLOY_OUTCOME}\`
+          - Authoritative staging smoke: \`${EVIDENCE_OUTCOME}\`
+          - GitHub runner runtime probe: \`${RUNTIME_OUTCOME}\`
+          - GitHub runner Mini App/package probe: \`${PRODUCT_OUTCOME}\`
           - Backup/migration/restart/health gate: \`${automated_gate}\`
+          - Full readiness/Mini App/package API gate: \`${automated_gate}\`
           - Run: ${run_url}
 
-          Evidence is stored in the workflow artifact. Secret values are not included.
+          The authoritative gate runs from the deployed staging host while rollback is armed. GitHub-runner probes are retained as network diagnostics only. Evidence is stored in the workflow artifact; secret values are not included.
+          EOF
+          gh issue comment 17 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file rollout-status.md
+
+  report-pre-rollout-failure:
+    name: Report staging validation or scheduling failure
+    needs: [validate, rollout]
+    if: always() && (needs.validate.result != 'success' || needs.rollout.result == 'skipped' || needs.rollout.result == 'cancelled')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish pre-rollout failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          ROLLOUT_RESULT: ${{ needs.rollout.result }}
+        run: |
+          set -Eeuo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          cat > rollout-status.md <<EOF
+          ## Staging rollout: failed
+
+          - SHA: \`${GITHUB_SHA}\`
+          - Branch: \`${GITHUB_REF_NAME}\`
+          - Validation result: \`${VALIDATE_RESULT}\`
+          - Rollout result: \`${ROLLOUT_RESULT}\`
+          - Backup/migration/restart/health gate: \`not_started\`
+          - Full readiness/Mini App/package API gate: \`not_started\`
+          - Run: ${run_url}
+
+          The failure occurred before authoritative staging evidence could be created. No secret values are included.
           EOF
           gh issue comment 17 \
             --repo "${GITHUB_REPOSITORY}" \

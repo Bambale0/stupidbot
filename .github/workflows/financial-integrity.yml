@@ -68,6 +68,8 @@ jobs:
         run: python scripts/regression_backend_contracts.py
       - name: Gallery compatibility regression
         run: python scripts/regression_gallery_compat.py
+      - name: Operations readiness regression
+        run: python scripts/regression_operations_readiness.py
       - name: Apply Alembic migrations
         run: python -m scripts.migrate_db
       - name: Runtime readiness
