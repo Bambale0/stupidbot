@@ -2,7 +2,7 @@ name: Docker auto deploy
 
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [Release gate]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -20,9 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
       DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
       DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
@@ -30,12 +34,35 @@ jobs:
       DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
       DEPLOY_APP_DIR: /root/stupidbot
     steps:
-      - name: Checkout deployed revision
+      - name: Checkout gated revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - name: Verify immutable release target
+        id: target
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          checked_out=$(git rev-parse HEAD)
+          [[ "${checked_out}" == "${DEPLOY_SHA}" ]] || {
+            echo "Checked out ${checked_out}, expected ${DEPLOY_SHA}" >&2
+            exit 1
+          }
+
+          git fetch --no-tags --depth=1 origin refs/heads/main
+          current_main=$(git rev-parse FETCH_HEAD)
+          if [[ "${DEPLOY_SHA}" != "${current_main}" ]]; then
+            echo "deploy=false" >> "${GITHUB_OUTPUT}"
+            echo "Skipping stale gated candidate ${DEPLOY_SHA}; current main is ${current_main}"
+            exit 0
+          fi
+
+          echo "deploy=true" >> "${GITHUB_OUTPUT}"
+          echo "Deploying current gated main ${DEPLOY_SHA}"
 
       - name: Verify deploy access configuration
+        if: steps.target.outputs.deploy == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -57,16 +84,18 @@ jobs:
           echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
 
       - name: Package immutable candidate
+        if: steps.target.outputs.deploy == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
           git archive \
             --format=tar.gz \
             --output=stupidbot-source.tar.gz \
-            "${GITHUB_SHA}"
+            "${DEPLOY_SHA}"
           sha256sum stupidbot-source.tar.gz > stupidbot-source.tar.gz.sha256
 
       - name: Configure SSH
+        if: steps.target.outputs.deploy == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -77,6 +106,7 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Transfer candidate
+        if: steps.target.outputs.deploy == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -90,12 +120,13 @@ jobs:
             "${remote}:${DEPLOY_APP_DIR}/.release/"
 
       - name: Build, migrate and deploy
+        if: steps.target.outputs.deploy == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
           remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
           ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s -- \
-            "${DEPLOY_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee deploy.log
+            "${DEPLOY_APP_DIR}" "${DEPLOY_SHA}" <<'REMOTE' 2>&1 | tee deploy.log
           set -Eeuo pipefail
           app_dir=$1
           release_sha=$2
@@ -105,10 +136,15 @@ jobs:
           REMOTE
 
       - name: Upload deploy evidence
-        if: always()
+        if: always() && steps.target.outputs.deploy == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: stupidbot-deploy-${{ github.sha }}
+          name: stupidbot-deploy-${{ env.DEPLOY_SHA }}
           path: deploy.log
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Report stale candidate
+        if: steps.target.outputs.deploy == 'false'
+        shell: bash
+        run: echo "No rollout performed because this gated commit is no longer current main."
