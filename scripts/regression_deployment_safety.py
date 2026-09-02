@@ -91,6 +91,23 @@ def check_staging_evidence() -> None:
     assert "github_runner_product_probe" in workflow
 
 
+def check_staging_ssh_pin() -> None:
+    workflow = _read(".github/workflows/staging-rollout.yml")
+    helper = _read("ops/configure_staging_ssh.sh")
+    fingerprint = "SHA256:g2yC4ErjAUcRGnaOYLj/ZgFkJzkn/8w5UvJE/tk9Chg"
+
+    assert f"STAGING_SSH_HOST_FINGERPRINT: {fingerprint}" in workflow
+    assert "ops/configure_staging_ssh.sh" in workflow
+    assert "STAGING_SSH_KNOWN_HOSTS" not in workflow
+    assert "ssh-keyscan" in helper
+    assert "ssh-keygen -lf" in helper
+    assert "actual_fingerprint" in helper
+    assert "expected_fingerprint" in helper
+    assert "Staging host key fingerprint mismatch" in helper
+    assert "StrictHostKeyChecking=no" not in workflow
+    assert "StrictHostKeyChecking=no" not in helper
+
+
 def check_http_readiness_contract() -> None:
     bot_source = _read("app/bot.py")
     readiness_source = _read("app/readiness.py")
@@ -122,6 +139,7 @@ if __name__ == "__main__":
     check_financial_workflow()
     check_rollout()
     check_staging_evidence()
+    check_staging_ssh_pin()
     check_http_readiness_contract()
     check_default_ci()
     from scripts.regression_http_readiness import amain as readiness_regression
