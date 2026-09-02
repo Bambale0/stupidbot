@@ -121,6 +121,9 @@ def check_staging_ssh_identity_recovery() -> None:
         "sudo -n true",
         "STAGING_SSH_USE_SUDO",
         "Deployment public-key fingerprint",
+        "ssh-keygen -y -f ~/.ssh/id_ed25519",
+        "Safe public key for authorized_keys recovery",
+        "stupidbot-github-actions",
     ):
         assert contract in helper, contract
 
@@ -133,6 +136,8 @@ def check_staging_ssh_identity_recovery() -> None:
     assert "PasswordAuthentication=yes" not in workflow
     assert "StrictHostKeyChecking=no" not in helper
     assert "StrictHostKeyChecking=no" not in workflow
+    assert "BEGIN OPENSSH PRIVATE KEY" not in helper
+    assert "cat ~/.ssh/id_ed25519" not in helper
 
 
 def check_http_readiness_contract() -> None:
