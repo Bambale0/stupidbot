@@ -22,16 +22,46 @@ def _assert_pipefail_before_tee(workflow: str, command: str) -> None:
     assert "set -Eeuo pipefail" in block, f"{command} must run with pipefail"
 
 
+def check_release_gate() -> None:
+    gate = _read(".github/workflows/release-gate.yml")
+    assert gate.count("branches: [main, master]") == 2, "release gate must protect pushes and PRs to main/master"
+    assert "uses: ./.github/workflows/ci.yml" in gate
+    assert "uses: ./.github/workflows/release-contracts.yml" in gate
+    assert "uses: ./.github/workflows/financial-integrity.yml" in gate
+    assert "name: Release ready" in gate
+    assert "if: always()" in gate, "final release gate must fail explicitly when any dependency fails"
+    assert '[[ "${CI_RESULT}" == "success" ]]' in gate
+    assert '[[ "${CONTRACTS_RESULT}" == "success" ]]' in gate
+    assert '[[ "${FINANCIAL_RESULT}" == "success" ]]' in gate
+
+    deploy = _read(".github/workflows/deploy.yml")
+    assert "workflows: [Release gate]" in deploy, "production deploy must depend on the complete release gate"
+    assert "github.event.workflow_run.event == 'push'" in deploy, "manual gate runs must not deploy implicitly"
+    assert "github.event.workflow_run.head_branch == 'main'" in deploy
+    assert "github.ref == 'refs/heads/main'" in deploy, "manual production deploy must be limited to main"
+    assert "DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in deploy
+    assert '"${DEPLOY_SHA}"' in deploy
+    assert 'git fetch --no-tags --depth=1 origin refs/heads/main' in deploy
+    assert 'if [[ "${DEPLOY_SHA}" != "${current_main}" ]]; then' in deploy
+    assert '"${DEPLOY_APP_DIR}" "${DEPLOY_SHA}"' in deploy
+
+
 def check_financial_workflow() -> None:
     workflow = _read(".github/workflows/financial-integrity.yml")
-    trigger = "branches: [dev, main, master]"
-    assert workflow.count(trigger) == 2, "financial CI must protect push and PRs for dev/main/master"
+    assert "workflow_call:" in workflow, "financial CI must be reusable by the release gate"
     assert "image: redis:7-alpine" in workflow, "financial CI must provide Redis"
     assert "REDIS_URL: redis://127.0.0.1:6379/0" in workflow
     _assert_pipefail_before_tee(workflow, "python scripts/regression_financial.py")
     _assert_pipefail_before_tee(workflow, "python scripts/regression_500_current.py")
     assert "python scripts/regression_deployment_safety.py" in workflow
     assert "python scripts/runtime_readiness.py" in workflow
+
+
+def check_reusable_workflows() -> None:
+    ci = _read(".github/workflows/ci.yml")
+    contracts = _read(".github/workflows/release-contracts.yml")
+    assert "workflow_call:" in ci
+    assert "workflow_call:" in contracts
 
 
 def check_rollout() -> None:
@@ -77,7 +107,9 @@ def check_default_ci() -> None:
 
 
 if __name__ == "__main__":
+    check_release_gate()
     check_financial_workflow()
+    check_reusable_workflows()
     check_rollout()
     check_http_readiness_contract()
     check_default_ci()
