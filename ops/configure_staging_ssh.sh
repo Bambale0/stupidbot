@@ -6,6 +6,7 @@ port=${STAGING_SSH_PORT:-22}
 configured_user=${STAGING_SSH_USER:?STAGING_SSH_USER is required}
 private_key=${STAGING_SSH_PRIVATE_KEY:?STAGING_SSH_PRIVATE_KEY is required}
 expected_fingerprint=${STAGING_SSH_HOST_FINGERPRINT:-SHA256:g2yC4ErjAUcRGnaOYLj/ZgFkJzkn/8w5UvJE/tk9Chg}
+repair_public_key_file=${STAGING_SSH_REPAIR_PUBLIC_KEY_FILE:-staging-deployment-key.pub}
 
 install -d -m 700 ~/.ssh
 printf '%s\n' "${private_key}" > ~/.ssh/id_ed25519
@@ -45,13 +46,20 @@ ssh-keygen -F "${host}" -f ~/.ssh/known_hosts >/dev/null 2>&1 \
 
 echo "Staging SSH host key verified against pinned SHA256 fingerprint"
 
+public_key=$(ssh-keygen -y -f ~/.ssh/id_ed25519)
+if [[ -z "${public_key}" ]]; then
+  echo "Unable to derive staging deployment public key" >&2
+  exit 78
+fi
+printf '%s stupidbot-github-actions\n' "${public_key}" > "${repair_public_key_file}"
+chmod 600 "${repair_public_key_file}"
+
 identity_fingerprint=$(
-  ssh-keygen -y -f ~/.ssh/id_ed25519 \
-    | ssh-keygen -lf - -E sha256 \
+  ssh-keygen -lf "${repair_public_key_file}" -E sha256 \
     | awk 'NR == 1 { print $2 }'
 )
 if [[ -z "${identity_fingerprint}" ]]; then
-  echo "Unable to read staging deployment private key" >&2
+  echo "Unable to fingerprint staging deployment public key" >&2
   exit 78
 fi
 
@@ -93,6 +101,9 @@ done
 if [[ -z "${selected_user}" ]]; then
   echo "Pinned staging host is reachable, but no approved staging account accepted the deployment key" >&2
   echo "Deployment public-key fingerprint: ${identity_fingerprint}" >&2
+  echo "Safe public key for authorized_keys recovery:" >&2
+  cat "${repair_public_key_file}" >&2
+  echo "Install that single public-key line into the intended staging account's ~/.ssh/authorized_keys, then rerun staging." >&2
   exit 78
 fi
 
