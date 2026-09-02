@@ -108,6 +108,33 @@ def check_staging_ssh_pin() -> None:
     assert "StrictHostKeyChecking=no" not in helper
 
 
+def check_staging_ssh_identity_recovery() -> None:
+    workflow = _read(".github/workflows/staging-rollout.yml")
+    helper = _read("ops/configure_staging_ssh.sh")
+
+    for contract in (
+        "BatchMode=yes",
+        "IdentitiesOnly=yes",
+        "PreferredAuthentications=publickey",
+        "PasswordAuthentication=no",
+        'candidates=("${configured_user}" root ubuntu debian deploy)',
+        "sudo -n true",
+        "STAGING_SSH_USE_SUDO",
+        "Deployment public-key fingerprint",
+    ):
+        assert contract in helper, contract
+
+    assert "STAGING_SSH_USE_SUDO" in workflow
+    assert "sudo -n mkdir -p" in workflow
+    assert "sudo -n bash -s --" in workflow
+    assert "sshpass" not in helper
+    assert "sshpass" not in workflow
+    assert "PasswordAuthentication=yes" not in helper
+    assert "PasswordAuthentication=yes" not in workflow
+    assert "StrictHostKeyChecking=no" not in helper
+    assert "StrictHostKeyChecking=no" not in workflow
+
+
 def check_http_readiness_contract() -> None:
     bot_source = _read("app/bot.py")
     readiness_source = _read("app/readiness.py")
@@ -140,6 +167,7 @@ if __name__ == "__main__":
     check_rollout()
     check_staging_evidence()
     check_staging_ssh_pin()
+    check_staging_ssh_identity_recovery()
     check_http_readiness_contract()
     check_default_ci()
     from scripts.regression_http_readiness import amain as readiness_regression
