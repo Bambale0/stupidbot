@@ -138,13 +138,31 @@ jobs:
         run: |
           set -Eeuo pipefail
           remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
-          ssh -p "${STAGING_SSH_PORT}" "${remote}" \
-            "mkdir -p '${STAGING_APP_DIR}/.release'"
-          scp -P "${STAGING_SSH_PORT}" \
-            stupidbot-source.tar.gz \
-            stupidbot-source.tar.gz.sha256 \
-            ops/staging_rollout.sh \
-            "${remote}:${STAGING_APP_DIR}/.release/"
+          release_dir="${STAGING_APP_DIR}/.release"
+          if [[ "${STAGING_SSH_USE_SUDO:-false}" == "true" ]]; then
+            temp_dir="/tmp/stupidbot-release-${GITHUB_SHA}"
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" \
+              "rm -rf '${temp_dir}' && mkdir -p '${temp_dir}'"
+            scp -P "${STAGING_SSH_PORT}" \
+              stupidbot-source.tar.gz \
+              stupidbot-source.tar.gz.sha256 \
+              ops/staging_rollout.sh \
+              "${remote}:${temp_dir}/"
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" \
+              "sudo -n mkdir -p '${release_dir}' && \
+               sudo -n cp '${temp_dir}/stupidbot-source.tar.gz' '${release_dir}/' && \
+               sudo -n cp '${temp_dir}/stupidbot-source.tar.gz.sha256' '${release_dir}/' && \
+               sudo -n cp '${temp_dir}/staging_rollout.sh' '${release_dir}/' && \
+               rm -rf '${temp_dir}'"
+          else
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" \
+              "mkdir -p '${release_dir}'"
+            scp -P "${STAGING_SSH_PORT}" \
+              stupidbot-source.tar.gz \
+              stupidbot-source.tar.gz.sha256 \
+              ops/staging_rollout.sh \
+              "${remote}:${release_dir}/"
+          fi
 
       - name: Backup, migrate and deploy
         id: deploy
@@ -152,15 +170,27 @@ jobs:
         run: |
           set -Eeuo pipefail
           remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
-          ssh -p "${STAGING_SSH_PORT}" "${remote}" bash -s -- \
-            "${STAGING_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee staging-rollout.log
-          set -Eeuo pipefail
-          app_dir=$1
-          release_sha=$2
-          cd "${app_dir}/.release"
-          chmod 700 staging_rollout.sh
-          ./staging_rollout.sh "${app_dir}" "${release_sha}"
-          REMOTE
+          if [[ "${STAGING_SSH_USE_SUDO:-false}" == "true" ]]; then
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" sudo -n bash -s -- \
+              "${STAGING_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee staging-rollout.log
+            set -Eeuo pipefail
+            app_dir=$1
+            release_sha=$2
+            cd "${app_dir}/.release"
+            chmod 700 staging_rollout.sh
+            ./staging_rollout.sh "${app_dir}" "${release_sha}"
+            REMOTE
+          else
+            ssh -p "${STAGING_SSH_PORT}" "${remote}" bash -s -- \
+              "${STAGING_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee staging-rollout.log
+            set -Eeuo pipefail
+            app_dir=$1
+            release_sha=$2
+            cd "${app_dir}/.release"
+            chmod 700 staging_rollout.sh
+            ./staging_rollout.sh "${app_dir}" "${release_sha}"
+            REMOTE
+          fi
 
       - name: Probe public liveness and readiness from GitHub runner
         id: runtime
