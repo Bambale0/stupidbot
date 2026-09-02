@@ -1,0 +1,114 @@
+name: Docker auto deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stupidbot-docker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to docker host
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+      DEPLOY_APP_DIR: /root/stupidbot
+    steps:
+      - name: Checkout deployed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Verify deploy access configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          for name in \
+            DEPLOY_SSH_HOST \
+            DEPLOY_SSH_USER \
+            DEPLOY_SSH_PRIVATE_KEY \
+            DEPLOY_SSH_KNOWN_HOSTS
+          do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("${name}")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required deploy secrets: %s\n' "${missing[*]}" >&2
+            exit 78
+          fi
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+
+      - name: Package immutable candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git archive \
+            --format=tar.gz \
+            --output=stupidbot-source.tar.gz \
+            "${GITHUB_SHA}"
+          sha256sum stupidbot-source.tar.gz > stupidbot-source.tar.gz.sha256
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Transfer candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" \
+            "mkdir -p '${DEPLOY_APP_DIR}/.release'"
+          scp -P "${DEPLOY_SSH_PORT}" \
+            stupidbot-source.tar.gz \
+            stupidbot-source.tar.gz.sha256 \
+            ops/deploy_docker.sh \
+            "${remote}:${DEPLOY_APP_DIR}/.release/"
+
+      - name: Build, migrate and deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s -- \
+            "${DEPLOY_APP_DIR}" "${GITHUB_SHA}" <<'REMOTE' 2>&1 | tee deploy.log
+          set -Eeuo pipefail
+          app_dir=$1
+          release_sha=$2
+          cd "${app_dir}/.release"
+          chmod 700 deploy_docker.sh
+          ./deploy_docker.sh "${app_dir}" "${release_sha}"
+          REMOTE
+
+      - name: Upload deploy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stupidbot-deploy-${{ github.sha }}
+          path: deploy.log
+          if-no-files-found: warn
+          retention-days: 30
