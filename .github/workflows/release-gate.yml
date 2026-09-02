@@ -1,0 +1,52 @@
+name: Release gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  contracts:
+    name: Release contracts
+    uses: ./.github/workflows/release-contracts.yml
+
+  financial:
+    name: Financial integrity
+    uses: ./.github/workflows/financial-integrity.yml
+
+  release-ready:
+    name: Release ready
+    if: always()
+    needs:
+      - ci
+      - contracts
+      - financial
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all required gates passed
+        env:
+          CI_RESULT: ${{ needs.ci.result }}
+          CONTRACTS_RESULT: ${{ needs.contracts.result }}
+          FINANCIAL_RESULT: ${{ needs.financial.result }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf 'CI=%s\nRelease contracts=%s\nFinancial integrity=%s\n' \
+            "${CI_RESULT}" "${CONTRACTS_RESULT}" "${FINANCIAL_RESULT}"
+          [[ "${CI_RESULT}" == "success" ]]
+          [[ "${CONTRACTS_RESULT}" == "success" ]]
+          [[ "${FINANCIAL_RESULT}" == "success" ]]
+          echo "Release gate passed"
