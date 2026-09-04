@@ -1,0 +1,68 @@
+name: Arhibot bot menu inspect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arhibot-bot-menu-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS; do
+            [[ -n "${!name:-}" ]] || { echo "Missing ${name}" >&2; exit 1; }
+          done
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Inspect bot menu buttons
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" python3 - <<'PY'
+          import json
+          import urllib.request
+          from pathlib import Path
+
+          for path in [Path('/root/alena/.env'), Path('/root/neuronuch/.env'), Path('/root/stupidbot/.env')]:
+              if not path.exists():
+                  continue
+              values = {}
+              for line in path.read_text(errors='ignore').splitlines():
+                  if line and not line.lstrip().startswith('#') and '=' in line:
+                      key, value = line.split('=', 1)
+                      values[key.strip()] = value.strip().strip('"').strip("'")
+              token = values.get('TELEGRAM_BOT_TOKEN') or values.get('BOT_TOKEN')
+              if not token:
+                  continue
+              try:
+                  with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/getMe', timeout=5) as r:
+                      me = json.load(r).get('result') or {}
+                  with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/getChatMenuButton', timeout=5) as r:
+                      menu = json.load(r).get('result') or {}
+                  webapp = (menu.get('web_app') or {}).get('url')
+                  print(f'@{me.get("username", "unknown")}: menu_type={menu.get("type", "unknown")} webapp={webapp or "none"}')
+              except Exception as exc:
+                  print(f'{path}: inspect failed ({type(exc).__name__})')
+          PY
