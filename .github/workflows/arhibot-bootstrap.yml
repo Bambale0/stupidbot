@@ -1,0 +1,149 @@
+name: Arhibot bootstrap deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arhibot-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arhibot-bootstrap-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy arhibot to existing Docker host
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+      DEPLOY_APP_DIR: /root/arhibot
+    steps:
+      - name: Checkout arhibot main
+        uses: actions/checkout@v7
+        with:
+          repository: Bambale0/arhibot
+          ref: main
+          path: arhibot
+          fetch-depth: 1
+
+      - name: Resolve and gate arhibot revision
+        id: target
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd arhibot
+          sha=$(git rev-parse HEAD)
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+          passed=0
+          for attempt in $(seq 1 30); do
+            response=$(curl -fsSL \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/Bambale0/arhibot/actions/runs?head_sha=${sha}&per_page=30")
+            conclusion=$(printf '%s' "${response}" | jq -r '[.workflow_runs[] | select(.name == "CI")][0].conclusion // empty')
+            status=$(printf '%s' "${response}" | jq -r '[.workflow_runs[] | select(.name == "CI")][0].status // empty')
+
+            if [[ "${conclusion}" == "success" ]]; then
+              passed=1
+              break
+            fi
+            if [[ "${status}" == "completed" && -n "${conclusion}" && "${conclusion}" != "success" ]]; then
+              echo "Arhibot CI failed for ${sha}: ${conclusion}" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          if (( passed == 0 )); then
+            echo "Timed out waiting for green arhibot CI for ${sha}" >&2
+            exit 1
+          fi
+
+          echo "Deploying green arhibot SHA ${sha}"
+
+      - name: Require existing SSH deploy access
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("${name}")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing stupidbot deploy secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+
+      - name: Package arhibot candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd arhibot
+          git archive --format=tar.gz --output=../arhibot-source.tar.gz "${{ steps.target.outputs.sha }}"
+          cd ..
+          sha256sum arhibot-source.tar.gz > arhibot-source.tar.gz.sha256
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Transfer arhibot candidate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" "mkdir -p '${DEPLOY_APP_DIR}/.release'"
+          scp -P "${DEPLOY_SSH_PORT}" \
+            arhibot-source.tar.gz \
+            arhibot-source.tar.gz.sha256 \
+            arhibot/ops/deploy_docker.sh \
+            "${remote}:${DEPLOY_APP_DIR}/.release/"
+
+      - name: Verify runtime configuration and deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s -- \
+            "${DEPLOY_APP_DIR}" "${{ steps.target.outputs.sha }}" <<'REMOTE' 2>&1 | tee arhibot-bootstrap.log
+          set -Eeuo pipefail
+          app_dir=$1
+          release_sha=$2
+
+          if [[ ! -f "${app_dir}/backend/.env" ]]; then
+            echo "Missing ${app_dir}/backend/.env" >&2
+            echo "Required runtime values include TELEGRAM_BOT_TOKEN and TELEGRAM_WEBAPP_URL." >&2
+            exit 2
+          fi
+
+          cd "${app_dir}/.release"
+          chmod 700 deploy_docker.sh
+          ./deploy_docker.sh "${app_dir}" "${release_sha}"
+          REMOTE
+
+      - name: Upload bootstrap log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arhibot-bootstrap-${{ steps.target.outputs.sha }}
+          path: arhibot-bootstrap.log
+          if-no-files-found: ignore
+          retention-days: 7
