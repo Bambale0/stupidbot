@@ -44,7 +44,7 @@ jobs:
           set -Eeuo pipefail
           for container in $(docker ps --format '{{.Names}}' | grep -Ei 'bot|telegram' || true); do
             echo "[$container]"
-            docker exec "$container" python - <<'PY' 2>/dev/null || true
+            docker exec -i "$container" python - <<'PY' 2>/dev/null || true
           import json
           import os
           import urllib.request
