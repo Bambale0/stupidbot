@@ -20,6 +20,7 @@ jobs:
       DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
       DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
       DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+      DOMAIN_ASCII: archibot.xn--e1aikcel5c5a.online
     steps:
       - name: Configure SSH
         shell: bash
@@ -32,14 +33,20 @@ jobs:
           printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Print safe host identity
+      - name: Compare SSH host and domain target
         shell: bash
         run: |
           set -Eeuo pipefail
           remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
-          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s <<'REMOTE'
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s -- "${DOMAIN_ASCII}" <<'REMOTE'
           set -Eeuo pipefail
+          domain="$1"
+          public_ip=$(curl -4 -fsS --max-time 8 https://api.ipify.org || true)
+          domain_ip=$(getent ahostsv4 "$domain" | awk 'NR==1 {print $1}')
+          if [[ -n "$public_ip" && "$public_ip" == "$domain_ip" ]]; then
+            echo 'HOST_MATCH=MATCH'
+          else
+            echo 'HOST_MATCH=MISMATCH'
+          fi
           echo "HOSTNAME=$(hostname)"
-          echo "LOCAL_IPS=$(hostname -I 2>/dev/null || true)"
-          echo "PUBLIC_IP=$(curl -4 -fsS --max-time 8 https://api.ipify.org || true)"
           REMOTE
