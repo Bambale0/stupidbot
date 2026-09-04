@@ -1,0 +1,68 @@
+name: Arhibot running bots inspect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arhibot-running-bots-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS; do
+            [[ -n "${!name:-}" ]] || { echo "Missing ${name}" >&2; exit 1; }
+          done
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Identify bot containers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          for container in $(docker ps --format '{{.Names}}' | grep -Ei 'bot|telegram' || true); do
+            echo "[$container]"
+            docker exec "$container" python - <<'PY' 2>/dev/null || true
+          import json
+          import os
+          import urllib.request
+
+          keys = ('TELEGRAM_BOT_TOKEN', 'BOT_TOKEN', 'TELEGRAM_TOKEN', 'FOXGEN_TELEGRAM_BOT_TOKEN')
+          token = next((os.environ.get(k) for k in keys if os.environ.get(k)), None)
+          if not token:
+              print('telegram_token=not_found_in_standard_env')
+              raise SystemExit(0)
+          try:
+              with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/getMe', timeout=5) as r:
+                  me = json.load(r).get('result') or {}
+              with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/getChatMenuButton', timeout=5) as r:
+                  menu = json.load(r).get('result') or {}
+              webapp = (menu.get('web_app') or {}).get('url') or 'none'
+              print(f'bot=@{me.get("username", "unknown")} id={me.get("id", "unknown")} menu={menu.get("type", "unknown")} webapp={webapp}')
+          except Exception as exc:
+              print(f'telegram_api_error={type(exc).__name__}')
+          PY
+          done
+          REMOTE
