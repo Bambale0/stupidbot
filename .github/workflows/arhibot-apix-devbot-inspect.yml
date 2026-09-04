@@ -1,0 +1,57 @@
+name: Arhibot apix devbot inspect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arhibot-apix-devbot-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS; do
+            [[ -n "${!name:-}" ]] || { echo "Missing ${name}" >&2; exit 1; }
+          done
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Inspect container metadata
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          container=apix-dev-bot-app
+          docker inspect "$container" --format 'IMAGE={{.Config.Image}}'
+          docker inspect "$container" --format 'ENTRYPOINT={{json .Config.Entrypoint}} CMD={{json .Config.Cmd}}'
+          echo 'ENV_KEYS_BEGIN'
+          docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | sed -E 's/=.*$//' \
+            | grep -Ei 'telegram|bot|token|webapp|mini|app' \
+            | sort -u || true
+          echo 'ENV_KEYS_END'
+          echo 'MOUNTS_BEGIN'
+          docker inspect "$container" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+          echo 'MOUNTS_END'
+          REMOTE
