@@ -1,0 +1,51 @@
+name: Arhibot devbot mode inspect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arhibot-devbot-mode-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS; do
+            [[ -n "${!name:-}" ]] || { echo "Missing ${name}" >&2; exit 1; }
+          done
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Inspect recent dev bot logs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          echo 'RECENT_LOG_SIGNALS_BEGIN'
+          docker logs apix-dev-bot-app --tail 300 2>&1 \
+            | grep -Ei 'telegram|webhook|polling|getupdates|bot|startup|uvicorn' \
+            | tail -n 100 \
+            | sed -E 's/[0-9]{7,15}:[A-Za-z0-9_-]{20,}/[TELEGRAM_TOKEN_REDACTED]/g' || true
+          echo 'RECENT_LOG_SIGNALS_END'
+          REMOTE
