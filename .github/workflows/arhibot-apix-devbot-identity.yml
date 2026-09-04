@@ -1,0 +1,45 @@
+name: Arhibot apix devbot identity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arhibot-apix-devbot-identity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS; do
+            [[ -n "${!name:-}" ]] || { echo "Missing ${name}" >&2; exit 1; }
+          done
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Ask Telegram from inside container
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" \
+            docker exec apix-dev-bot-app python -c \
+            'import json,os,urllib.request; t=os.environ["BOT_TOKEN"]; me=json.load(urllib.request.urlopen("https://api.telegram.org/bot"+t+"/getMe",timeout=5))["result"]; menu=json.load(urllib.request.urlopen("https://api.telegram.org/bot"+t+"/getChatMenuButton",timeout=5))["result"]; print("BOT=@%s id=%s menu=%s webapp=%s"%(me.get("username"),me.get("id"),menu.get("type"),(menu.get("web_app") or {}).get("url") or "none"))'
