@@ -1,0 +1,107 @@
+name: Arhibot runtime discover
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arhibot-runtime-discover.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+      DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+      DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_PRIVATE_KEY DEPLOY_SSH_KNOWN_HOSTS; do
+            [[ -n "${!name:-}" ]] || { echo "Missing ${name}" >&2; exit 1; }
+          done
+          echo "DEPLOY_SSH_PORT=${DEPLOY_SSH_PORT:-22}" >> "${GITHUB_ENV}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Discover bot identities and public domains
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          remote="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${remote}" python3 - <<'PY'
+          import json
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          roots = [Path('/root'), Path('/opt')]
+          env_files = []
+          for root in roots:
+              if root.exists():
+                  env_files.extend(root.glob('*/.env'))
+                  env_files.extend(root.glob('*/backend/.env'))
+
+          print('BOT_CANDIDATES_BEGIN')
+          seen_tokens = set()
+          for path in sorted(set(env_files)):
+              try:
+                  lines = path.read_text(errors='ignore').splitlines()
+              except Exception:
+                  continue
+              values = {}
+              for line in lines:
+                  if not line or line.lstrip().startswith('#') or '=' not in line:
+                      continue
+                  key, value = line.split('=', 1)
+                  values[key.strip()] = value.strip().strip('"').strip("'")
+              for key in ('TELEGRAM_BOT_TOKEN', 'BOT_TOKEN', 'FOXGEN_TELEGRAM_BOT_TOKEN'):
+                  token = values.get(key, '')
+                  if not token or token in seen_tokens:
+                      continue
+                  seen_tokens.add(token)
+                  try:
+                      with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/getMe', timeout=5) as response:
+                          payload = json.load(response)
+                      result = payload.get('result') or {}
+                      if payload.get('ok'):
+                          print(f'{path}: @{result.get("username", "unknown")} id={result.get("id", "unknown")}')
+                  except Exception as exc:
+                      print(f'{path}: Telegram token present but getMe failed ({type(exc).__name__})')
+          print('BOT_CANDIDATES_END')
+
+          print('PUBLIC_DOMAINS_BEGIN')
+          candidates = []
+          for pattern in ('/etc/nginx/sites-enabled/*', '/etc/nginx/conf.d/*.conf', '/etc/caddy/Caddyfile'):
+              candidates.extend(Path('/').glob(pattern.lstrip('/')))
+          seen = set()
+          domain_re = re.compile(r'(?<![\w.-])(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?![\w.-])')
+          for path in candidates:
+              try:
+                  text = path.read_text(errors='ignore')
+              except Exception:
+                  continue
+              for domain in domain_re.findall(text):
+                  domain = domain.lower()
+                  if domain in seen or domain.endswith(('example.com', 'example.org')):
+                      continue
+                  seen.add(domain)
+                  print(f'{path}: https://{domain}')
+          print('PUBLIC_DOMAINS_END')
+
+          print('DOCKER_PORTS_BEGIN')
+          import subprocess
+          subprocess.run(['docker', 'ps', '--format', '{{.Names}} {{.Ports}}'], check=False)
+          print('DOCKER_PORTS_END')
+          PY
