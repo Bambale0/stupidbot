@@ -1,258 +1,122 @@
-# StupidBot
+# BANANA AI Platform
 
-Telegram webhook-приложение BANANA на FastAPI и aiogram: генерация изображений и видео, повтор с сохранёнными референсами, Mini App, T-Bank платежи, партнерская программа, публичная лента и админ-панель.
+> **Production Telegram AI product** · FastAPI · aiogram · PostgreSQL · Redis · T-Bank billing · hybrid subscriptions/credits · staging/rollback automation
+>
+> Repository codename: `stupidbot`.
 
-## Production stack
+BANANA is a production Telegram AI platform for image and video generation. Its strongest portfolio angle is not the model catalog itself, but the operational and financial layer around it: payments, subscriptions, credit packages, idempotent accounting, background broadcasts, database migrations, staging rollout, backup/restore checks and rollback safety.
 
-- Python 3.11
-- PostgreSQL
-- Redis
-- HTTPS-домен для Telegram webhook и Mini App
-- systemd и nginx либо эквивалентный process manager/reverse proxy
-- Comet и/или KIE API credentials
-- T-Bank credentials для онлайн-оплаты
+## Engineering highlights
 
-## Установка
+- FastAPI webhook application with aiogram.
+- PostgreSQL for durable product and financial state.
+- Redis for FSM/runtime coordination.
+- Image/video generation through Comet and KIE provider adapters.
+- Telegram Mini App and public gallery/feed flows.
+- Saved reference sets and repeat-generation workflows.
+- T-Bank payment integration.
+- Hybrid economy: time-based subscription + independent credit balances.
+- Partner/referral accounting and withdrawals.
+- Idempotent payment confirmation and reversal logic.
+- Non-blocking batch broadcasts with persisted progress.
+- CI financial-integrity gate on PostgreSQL + Redis.
+- Staging rollout with backup, restore verification, health checks and rollback.
+
+## Product architecture
+
+```text
+Telegram / Mini App
+        |
+        v
+ FastAPI + aiogram
+        |
+        +--> generation plugins ---> Comet / KIE
+        +--> payment services ------> T-Bank
+        +--> admin operations
+        +--> partner/referral flows
+        |
+        +--> PostgreSQL
+        +--> Redis
+```
+
+The application is organized as plugins for core UX, generation, references, feed/gallery, payments, partners, admin and finance rather than one large handler module.
+
+## Billing model
+
+BANANA deliberately keeps two value systems independent:
+
+1. **Subscription** — access for a limited period.
+2. **Credits** — separate image/video/universal balances.
+
+Buying a subscription does not erase credits, and buying credits does not change subscription expiry.
+
+Financial mutation paths are designed to be idempotent:
+
+- duplicate provider/payment callbacks do not credit twice;
+- repeated manual confirmation does not extend a subscription twice;
+- refunds/reversals are represented as explicit ledger operations;
+- negative prices and balances are protected by constraints and validation.
+
+## Reliable broadcasts
+
+Admin broadcasts run outside the Telegram webhook request path. Recipients are read in bounded batches, blocked users are excluded, and progress counters are persisted after each batch. Interrupted runs are not blindly restarted, avoiding duplicate sends to part of the audience.
+
+## Staging and release safety
+
+The staging rollout performs a guarded sequence:
+
+```text
+candidate SHA
+    |
+    +--> immutable archive + checksum
+    +--> code/database backup
+    +--> isolated restore verification
+    +--> compile/contracts
+    +--> migrations + regressions
+    +--> PostgreSQL/Redis readiness
+    +--> service restart
+    +--> local/public health checks
+    |
+    +--> success: release candidate accepted
+    |
+    +--> failure: rollback path remains available
+```
+
+Paid provider and payment smoke workflows are manual-only so CI cannot accidentally spend provider credits or charge real cards.
+
+## Stack
+
+| Area | Technology |
+| --- | --- |
+| Backend | Python 3.11, FastAPI, aiogram |
+| Data | PostgreSQL, Redis |
+| AI providers | Comet API, KIE.AI |
+| Payments | T-Bank |
+| Runtime | systemd, Nginx |
+| Tests | compile/contracts + financial regression suites |
+| Delivery | GitHub Actions, staging rollout, rollback checks |
+
+## Local development
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip setuptools wheel
-python -m pip install -e ".[dev]"
+python -m pip install -e '.[dev]'
 cp .env.example .env
 python -m scripts.init_db
-```
-
-`APP_ENV=production` включает обязательную проверку Telegram/callback secrets и HTTPS `PUBLIC_BASE_URL`.
-
-## Основные переменные окружения
-
-### Приложение
-
-- `APP_ENV`
-- `PUBLIC_BASE_URL`
-- `PORT`
-- `LOG_LEVEL`
-- `DATABASE_URL`
-- `REDIS_URL`
-- `ADMIN_IDS`
-
-### Telegram
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_SECRET_TOKEN`
-- `TELEGRAM_WEBHOOK_PATH`
-- `TELEGRAM_SET_WEBHOOK`
-- `TELEGRAM_BOT_USERNAME`
-- `MINI_APP_PATH`
-
-### Провайдеры
-
-- `COMET_API_KEY`
-- `COMET_BASE_URL`
-- `COMET_CALLBACK_SECRET`
-- `KIE_API_KEY`
-- `KIE_BASE_URL`
-- `KIE_UPLOAD_BASE_URL`
-- model-specific Comet/KIE variables из `.env.example`
-
-### Платежи и гибридная экономика
-
-- `TBANK_TERMINAL_KEY`
-- `TBANK_PASSWORD`
-- `TBANK_SUCCESS_URL`
-- `TBANK_FAIL_URL`
-
-Пользователь может одновременно использовать два способа оплаты:
-
-- купить платную подписку на ограниченный срок; повторная покупка продлевает действующую подписку;
-- отдельно покупать фиксированные пакеты фото-, видео- или универсальных кредитов.
-
-Подписка и кредитные балансы хранятся независимо: покупка подписки не стирает кредиты, а покупка кредитов не меняет срок подписки. Стандартная подписка оплачивается разово и не имеет автопродления. Произвольная покупка пользовательского количества универсальных кредитов отключена; доступны только настроенные администратором пакеты.
-
-## Запуск
-
-Локально:
-
-```bash
-source .venv/bin/activate
-python -m app.main
-```
-
-Production:
-
-```bash
-systemctl restart stupidbot
-systemctl is-active stupidbot
-journalctl -u stupidbot --since "5 minutes ago" --no-pager
-```
-
-Пример unit-файла находится в `systemd/stupidbot.service`.
-
-## Пользовательские сценарии
-
-- «Создать фото» открывает выбор активной модели и текущей цены.
-- «Мои референсы» на экране фото-моделей показывает последние уникальные наборы Telegram `file_id`.
-- Повтор собственной генерации восстанавливает фото, модель, промпт, формат и качество.
-- Перед повторным запуском заново проверяются доступность модели, лимит фото, актуальная цена и баланс.
-- Повтор публичной работы не копирует чужой результат и требует собственный референс.
-- Две приветственные попытки применяются только к фото; видео всегда требует платную подписку либо достаточный видео/универсальный баланс.
-- В разделе пополнения одновременно показываются подписка и отдельные пакеты кредитов.
-
-## Админ-панель
-
-Администратор может управлять пользователями, балансами, подписками, тарифами, моделями, платежами, рефералами, выводами, галереей, настройками и рассылками.
-
-Финансовые действия выполняются идемпотентно: повторное подтверждение уже оплаченного платежа не зачисляет кредиты повторно и не продлевает подписку второй раз. Ручное подтверждение разрешено только для платежей со статусом `manual_pending`.
-
-Рассылка запускается фоновой задачей и не удерживает Telegram webhook. Получатели читаются из PostgreSQL ограниченными пачками, заблокированные пользователи исключаются, а прогресс `sent_count`/`fail_count` сохраняется после каждой пачки. При остановке процесса незавершённая рассылка получает статус `interrupted` и не перезапускается автоматически, чтобы не отправлять сообщения повторно части аудитории.
-
-## Проверки
-
-### Быстрый локальный набор
-
-```bash
 bash scripts/ci.sh
 ```
 
-Он выполняет:
+## Security principles
 
-- compileall;
-- deployment safety contract;
-- Telegram UX contract;
-- reusable reference regression;
-- gallery compatibility;
-- admin smoke;
-- broad current-policy regression.
+- environment secrets are not committed;
+- provider/payment callbacks are verified before financial mutation;
+- users do not receive internal tracebacks or provider secrets;
+- saved references remain owner-scoped;
+- payment/finalization/refund handlers are idempotent;
+- database backup/restore is part of release verification.
 
-### PostgreSQL/Redis gate
+## Portfolio note
 
-Workflow `.github/workflows/financial-integrity.yml` запускается для PR и push в `dev`, `main`, `master` и проверяет:
-
-- PostgreSQL 16 и Redis 7 readiness;
-- Alembic migrations;
-- reusable reference flow;
-- гибридную экономику подписки и кредитных пакетов;
-- активацию, продление и сторно подписки;
-- ручные админские подтверждения платежей и их идемпотентность;
-- пакетную неблокирующую рассылку и исключение заблокированных пользователей;
-- привязку реферала, aliases, self/cycle/rebind/blocked guards;
-- комиссии за кредитные пакеты и подписки, повторную обработку, выводы и сторно;
-- financial ledger/reversal/idempotency regressions;
-- broad current-policy regression;
-- transactional DB smoke;
-- backup/restore drill.
-
-Локальные команды:
-
-```bash
-python scripts/runtime_readiness.py
-python scripts/reference_regression.py
-python scripts/regression_financial.py
-python scripts/regression_500_current.py
-python scripts/staging_issue3_db_smoke.py
-```
-
-## Миграции и seed
-
-```bash
-python -m scripts.init_db
-```
-
-Команда применяет Alembic/compatibility schema и создает обязательные defaults. Она должна выполняться до запуска новой версии сервиса.
-
-## Staging rollout
-
-Push в `dev` запускает `.github/workflows/staging-rollout.yml`.
-
-Gate выполняет:
-
-1. immutable archive и checksum;
-2. backup кода и PostgreSQL custom-format dump;
-3. isolated restore verification;
-4. candidate compile и contracts до изменения приложения;
-5. миграции и regressions;
-6. PostgreSQL/Redis readiness;
-7. restart и systemd status;
-8. локальный health;
-9. публичные health, Mini App runtime и packages smoke.
-
-Rollback остается активным до завершения public smoke. При ошибке после начала mutation восстанавливается предыдущий код; database dump сохраняется для ручного восстановления данных при необходимости.
-
-Основной скрипт: `ops/staging_rollout.sh`.
-
-## Manual paid smoke
-
-Платные provider и T-Bank workflows запускаются только вручную и требуют явной confirmation phrase:
-
-- `.github/workflows/provider-paid-smoke.yml`
-- `.github/workflows/tbank-live-smoke.yml`
-
-Не запускайте их на production-картах или без согласованного тестового бюджета.
-
-## Архитектура
-
-```text
-app/
-  main.py                  FastAPI, Telegram webhook, Mini App API
-  bot.py                   aiogram dispatcher, middleware, commands
-  config.py                environment settings
-  db.py                    SQLAlchemy schema compatibility
-  models.py                domain models and ledgers
-  plugins/
-    core/                   start, profile, balance, support
-    generation/             image/video flows
-    references/             personal repeat and saved Telegram file_id sets
-    feed/                   public feed
-    gallery/                legacy-compatible feed alias
-    payments/               packages, subscriptions and payment UX
-    partners/               referrals and withdrawals
-    admin/                  operations and configuration
-    finance/                financial analytics
-    ux/                     production navigation contracts
-  services/
-    admin_hardening.py      bounded background broadcasts and recovery
-    billing_catalog.py      hybrid subscription/credit catalog
-    comet.py
-    kie.py
-    tbank.py
-    task_tracker.py
-    financial_*.py
-scripts/
-  ci.sh
-  runtime_readiness.py
-  reference_regression.py
-  regression_admin_operations.py
-  regression_billing_referrals.py
-  regression_deployment_safety.py
-  regression_bot_ux.py
-  regression_financial.py
-  regression_500_current.py
-ops/
-  staging_rollout.sh
-  verify_postgres_restore.sh
-```
-
-## Security rules
-
-- не коммитить `.env`, токены, private keys, dumps и реальные customer payloads;
-- не выводить secrets в Actions artifacts или issue comments;
-- callback/webhook signatures проверяются до финансовой mutation;
-- пользователь не получает provider traceback или внутренние идентификаторы;
-- отрицательные цены и балансы запрещены DB constraints;
-- credit и affiliate ledgers append-only;
-- повторные callbacks/finalization/refunds должны быть idempotent;
-- сохранённые референсы доступны только владельцу исходной задачи.
-
-## Release policy
-
-`dev` — staging/release-candidate branch. `main` — выпущенная версия.
-
-Перед merge `dev -> main` обязательны:
-
-- отсутствие открытых P0/P1/P2 blockers;
-- зеленые CI и Financial integrity;
-- успешный staging rollout текущего SHA;
-- backup/restore evidence;
-- актуальный rollback plan;
-- синхронизация `main` и `dev` после release.
+BANANA is the portfolio case for **billing integrity and production operations**: it shows how a Telegram AI product behaves when real money, migrations, background jobs, provider failures and deployment rollback matter.
